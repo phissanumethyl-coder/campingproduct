@@ -20,32 +20,32 @@
   </header>
 
   <main class="sales-layout">
-    <section class="stage">
+    <section class="top">
       <div class="step"><span class="step-n">1</span> เลือกรูปแบบชุด</div>
       <div id="templates" class="chips"></div>
 
       <div class="step"><span class="step-n">2</span> กดเลือกชุดสำเร็จรูป <span class="muted">หรือลากสินค้าจากแคตตาล็อกมาวางในช่องเอง</span></div>
       <div id="presets" class="presets"></div>
-
-      <div class="board-wrap">
-        <div class="board-tools">
-          <span class="info" id="slotInfo"></span>
-          <span id="addSlotBtns"></span>
-          <button class="btn sm danger" id="clearBoard">ล้างสินค้าในช่อง</button>
-        </div>
-        <div id="board" class="board"></div>
-        <p class="hint">ลากสินค้าวางลงช่อง · แตะสินค้าในแคตตาล็อกเพื่อใส่ช่องว่างถัดไป · ลากสินค้าในช่องไปช่องอื่นเพื่อสลับ หรือลากออกนอกกระดานเพื่อเอาออก · ปุ่ม ⇉ = ใช้ตัวนี้กับทุกช่องที่ว่าง</p>
-      </div>
     </section>
 
-    <aside class="side">
-      <div class="panel catalog">
-        <div class="panel-h">แคตตาล็อก <input id="search" type="search" placeholder="ค้นหารหัส / ชื่อ"></div>
-        <div id="catTabs" class="tabs"></div>
-        <div id="catalog" class="catalog-grid"></div>
+    <section class="board-wrap">
+      <div class="board-tools">
+        <span class="info" id="slotInfo"></span>
+        <span id="addSlotBtns"></span>
+        <button class="btn sm danger" id="clearBoard">ล้างสินค้าในช่อง</button>
       </div>
-      <div class="panel summary" id="summary"></div>
+      <div class="quick" id="quick"></div>
+      <div id="board" class="board"></div>
+      <p class="hint">ลากสินค้าวางลงช่อง · แตะสินค้าเพื่อใส่ช่องว่างถัดไป · ลากในช่องเพื่อสลับ / ลากออกนอกกระดานเพื่อเอาออก · ⇉ = ใช้ตัวนี้ทุกช่องที่ว่าง</p>
+    </section>
+
+    <aside class="panel catalog">
+      <div class="panel-h">แคตตาล็อก <input id="search" type="search" placeholder="ค้นหารหัส / ชื่อ"></div>
+      <div id="catTabs" class="tabs"></div>
+      <div id="catalog" class="catalog-grid"></div>
     </aside>
+
+    <section class="panel summary" id="summary"></section>
   </main>
 </div>
 
@@ -130,6 +130,8 @@ function loadPreset(id) {
   S.discount = pr.setPrice > 0 ? Math.max(0, sum - pr.setPrice) : 0;
   renderPresets(); renderBoard(true); renderSummary(); renderCatalog();
   U.toast('โหลด ' + pr.name);
+  const bw = document.querySelector('.board-wrap'), r = bw.getBoundingClientRect();
+  if (r.top < 60 || r.bottom > innerHeight) bw.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /* ---------------- board ---------------- */
@@ -288,12 +290,14 @@ function renderSummary() {
   const g = group(pids);
   $('#summary').innerHTML = `
     <div class="panel-h">สรุปชุดที่จัด <span class="tag">${pr ? U.esc(pr.name) + (S.modified ? ' · ปรับแต่ง' : '') : 'จัดเอง'}</span></div>
+    <div class="sum-grid"><div>
     ${empty ? `<div class="warn">ยังมีช่องว่าง ${empty} ช่อง</div>` : ''}
     ${g.length ? `<div class="lines">${g.map(x => `<div class="line">
         <img src="${U.img(x.p, D)}" alt="">
         <div class="ln-main"><b>${U.esc(x.p.code)}</b> ${U.esc(x.p.name)}<small>฿${U.fmt(x.p.price)}/ชิ้น<span class="cost"> · ทุน ฿${U.fmt(x.p.cost)}</span></small></div>
         <div class="ln-qty">×${x.qty}</div><div class="ln-amt">฿${U.fmt(x.p.price * x.qty)}</div></div>`).join('')}</div>`
       : '<p class="muted">ยังไม่มีสินค้าในชุด</p>'}
+    </div><div>
     <div class="tot-row"><span>ราคารวม</span><b id="tSum"></b></div>
     <div class="tot-row"><span>ส่วนลด</span><span class="disc">฿<input id="disc" type="number" min="0" inputmode="numeric" placeholder="0" value="${S.discount || ''}"></span></div>
     <div class="tot-net"><span>ราคาขายสุทธิ</span><b id="tNet"></b></div>
@@ -302,7 +306,8 @@ function renderSummary() {
       <div class="tot-row"><span>กำไร</span><b id="tProfit"></b></div>
       <div class="meter"><i id="tMeter"></i></div>
     </div>
-    <div class="sum-actions"><button class="btn primary" id="copyQuote">📋 คัดลอกข้อความเสนอราคา</button></div>`;
+    <div class="sum-actions"><button class="btn primary" id="copyQuote">📋 คัดลอกข้อความเสนอราคา</button></div>
+    </div></div>`;
   updateTotals();
 }
 function totals() {
@@ -317,6 +322,11 @@ function updateTotals() {
   $('#tCost').textContent = '฿' + U.fmt(t.cost);
   $('#tProfit').innerHTML = `฿${U.fmt(t.profit)} <small>(${t.m.toFixed(1)}%)</small>`;
   $('#tProfit').className = marginCls(t.m);
+  $('#quick').innerHTML = `<span>รวม <b>฿${U.fmt(t.sum)}</b></span>${S.discount ? `<span>ลด <b>฿${U.fmt(S.discount)}</b></span>` : ''}
+    <span class="q-net">สุทธิ <b>฿${U.fmt(t.net)}</b></span>
+    <span class="cost">ทุน <b>฿${U.fmt(t.cost)}</b></span>
+    <span class="cost">กำไร <b class="${marginCls(t.m)}">฿${U.fmt(t.profit)} (${t.m.toFixed(0)}%)</b></span>
+    <a href="#summary" class="q-link">ดูรายละเอียด ↓</a>`;
   const bar = $('#tMeter');
   bar.style.width = Math.max(0, Math.min(100, t.m * 2)) + '%';
   bar.style.background = getComputedStyle(document.documentElement).getPropertyValue(t.m >= 35 ? '--ok' : t.m >= 20 ? '--warn' : '--danger');
