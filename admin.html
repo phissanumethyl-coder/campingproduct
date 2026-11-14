@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CampSet — ผู้ดูแล</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand">⛺ <span id="shopName">CampSet</span> <small>ผู้ดูแลระบบ</small></div>
+    <div class="top-actions">
+      <a href="index.html" class="btn sm">ไปหน้าจัดชุดขาย →</a>
+      <button class="btn sm" id="logout">ออกจากระบบ</button>
+    </div>
+  </header>
+  <div class="admin-wrap">
+    <nav class="atabs">
+      <button class="atab" data-tab="products">📦 สินค้า / แคตตาล็อก</button>
+      <button class="atab" data-tab="presets">⭐ ชุดสำเร็จรูป</button>
+      <button class="atab" data-tab="templates">🧩 รูปแบบชุด (ช่อง)</button>
+      <button class="atab" data-tab="categories">🗂 หมวดหมู่</button>
+      <button class="atab" data-tab="settings">⚙️ ตั้งค่า</button>
+    </nav>
+    <div id="view"></div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <div id="dlgBody"></div>
+    <div class="dlg-foot">
+      <button value="cancel" class="btn ghost" formnovalidate>ยกเลิก</button>
+      <button value="ok" class="btn primary">บันทึก</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="store.js"></script>
+<script>
+const U = CampUI, esc = U.esc, fmt = U.fmt;
+let D, tab = 'products', pf = 'all';
+const $ = s => document.querySelector(s);
+const P = id => D.products.find(p => p.id === id);
+const C = id => D.categories.find(c => c.id === id) || { id, name: '(ไม่มีหมวด)', icon: 'other' };
+const T = id => D.templates.find(t => t.id === id);
+const marginCls = m => m >= 35 ? 'good' : m >= 20 ? 'mid' : 'bad';
+const pct = (price, cost) => price ? ((price - cost) / price * 100) : 0;
+const countLabel = counts => D.categories.filter(c => counts?.[c.id]).map(c => `${c.name} ${counts[c.id]}`).join(' + ') || '—';
+
+CampAuth.require('admin', init);
+
+async function init() {
+  D = await CampStore.load();
+  $('#shopName').textContent = D.settings.shopName;
+  document.querySelectorAll('.atab').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); });
+  $('#logout').onclick = () => CampAuth.logout();
+  render();
+}
+async function persist(msg) {
+  try { await CampStore.save(D); U.toast(msg || 'บันทึกแล้ว'); return true; }
+  catch (e) { alert('บันทึกไม่สำเร็จ: ' + e.message + '\n(พื้นที่เก็บในเบราว์เซอร์อาจเต็ม ลองใช้รูปที่เล็กลงหรือลบรูปที่ไม่ใช้)'); return false; }
+}
+function render() {
+  document.querySelectorAll('.atab').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  ({ products: vProducts, presets: vPresets, templates: vTemplates, categories: vCategories, settings: vSettings })[tab]();
+}
+
+/* ---------- dialog ---------- */
+let dlgSave = null;
+function openDlg(html, onSave, after) {
+  $('#dlgBody').innerHTML = html; dlgSave = onSave;
+  $('#dlg').showModal(); after?.($('#dlgBody'));
+}
+$('#dlgForm').addEventListener('submit', async e => {
+  if (e.submitter?.value !== 'ok') return;
+  e.preventDefault();
+  if (await dlgSave()) $('#dlg').close();
+});
+
+/* ================= สินค้า ================= */
+function vProducts() {
+  const list = D.products.filter(p => pf === 'all' || p.cat === pf);
+  const v = $('#view');
+  v.innerHTML = `
+    <div class="vh"><div><h2>สินค้าในแคตตาล็อก</h2><p>เพิ่ม/แก้ไขสินค้า ราคาขาย ต้นทุน และอัปโหลดรูป แยกตามหมวดหมู่</p></div>
+      <button class="btn primary" id="addP">+ เพิ่มสินค้า</button></div>
+    <div class="chips small">${['all', ...D.categories.map(c => c.id)].map(id =>
+      `<button class="chip ${pf === id ? 'on' : ''}" data-f="${id}">${id === 'all' ? 'ทั้งหมด' : esc(C(id).name)} <small>${id === 'all' ? D.products.length : D.products.filter(p => p.cat === id).length}</small></button>`).join('')}</div>
+    <div class="plist">${list.map(p => {
+      const m = pct(p.price, p.cost);
+      return `<div class="prow"><img src="${U.img(p, D)}" alt="">
+        <div class="pr-main"><b>${esc(p.code)}</b> ${esc(p.name)}<small>${esc(C(p.cat).name)}${p.size ? ' · ' + esc(p.size) : ''}</small></div>
+        <div class="pr-num"><span>ขาย ฿${fmt(p.price)}</span><span class="muted">ทุน ฿${fmt(p.cost)}</span><span class="${marginCls(m)}">กำไร ${m.toFixed(0)}%</span></div>
+        <div class="pr-act"><button class="btn sm" data-edit="${p.id}">แก้ไข</button><button class="btn sm danger" data-del="${p.id}">ลบ</button></div></div>`;
+    }).join('') || '<p class="muted">ยังไม่มีสินค้าในหมวดนี้</p>'}</div>`;
+  v.onclick = async e => {
+    const t = e.target.closest('button'); if (!t) return;
+    if (t.id === 'addP') editProduct();
+    else if (t.dataset.f) { pf = t.dataset.f; vProducts(); }
+    else if (t.dataset.edit) editProduct(t.dataset.edit);
+    else if (t.dataset.del) {
+      const p = P(t.dataset.del);
+      const used = D.presets.filter(s => s.items.includes(p.id));
+      if (!confirm(`ลบ ${p.code} ${p.name}?` + (used.length ? `\n\nสินค้านี้อยู่ในชุดสำเร็จรูป ${used.length} ชุด (${used.map(s => s.name).join(', ')}) จะถูกเอาออกจากชุดเหล่านั้นด้วย` : ''))) return;
+      D.products = D.products.filter(x => x.id !== p.id);
+      D.presets.forEach(s => s.items = s.items.filter(id => id !== p.id));
+      await persist('ลบแล้ว'); vProducts();
+    }
+  };
+}
+function editProduct(id) {
+  const isNew = !id;
+  const p = isNew ? { id: U.uid('p'), code: '', name: '', size: '', cat: pf !== 'all' ? pf : D.categories[0]?.id, price: 0, cost: 0, color: '#7a6a55', image: '' }
+                  : { ...P(id) };
+  openDlg(`<h3>${isNew ? 'เพิ่มสินค้า' : 'แก้ไขสินค้า ' + esc(p.code)}</h3>
+    <div class="form">
+      <div class="img-up"><img id="fImg" src="${U.img(p, D)}" alt="">
+        <div><label class="btn sm">📷 อัปโหลดรูป<input type="file" id="fFile" accept="image/*" hidden></label>
+        <button type="button" class="btn sm ghost" id="fNoImg">ใช้ไอคอนแทน</button>
+        <div class="muted" style="font-size:12px;margin-top:4px">รูปจะถูกย่อให้อัตโนมัติ</div></div></div>
+      <div class="row2"><label>รหัสสินค้า *<input id="fCode" required value="${esc(p.code)}" placeholder="เช่น T-F"></label>
+        <label>หมวดหมู่<select id="fCat">${D.categories.map(c => `<option value="${c.id}" ${c.id === p.cat ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label></div>
+      <label>ชื่อสินค้า *<input id="fName" required value="${esc(p.name)}"></label>
+      <label>ขนาด / รายละเอียดสั้นๆ<input id="fSize" value="${esc(p.size || '')}" placeholder="เช่น 90×60 ซม."></label>
+      <div class="row2"><label>ราคาขาย (บาท) *<input id="fPrice" type="number" min="0" required value="${p.price}"></label>
+        <label>ต้นทุน (บาท) *<input id="fCost" type="number" min="0" required value="${p.cost}"></label></div>
+      <div class="muted" id="fMargin" style="font-size:13px"></div>
+      <label>สีไอคอน (ใช้เมื่อไม่มีรูป)<input id="fColor" type="color" value="${p.color || '#7a6a55'}"></label>
+    </div>`,
+    async () => {
+      const code = $('#fCode').value.trim();
+      if (D.products.some(x => x.code.toLowerCase() === code.toLowerCase() && x.id !== p.id)) { alert('รหัสสินค้านี้มีอยู่แล้ว'); return false; }
+      Object.assign(p, { code, name: $('#fName').value.trim(), size: $('#fSize').value.trim(), cat: $('#fCat').value,
+        price: +$('#fPrice').value || 0, cost: +$('#fCost').value || 0, color: $('#fColor').value });
+      if (isNew) D.products.push(p); else D.products[D.products.findIndex(x => x.id === p.id)] = p;
+      const ok = await persist(); if (ok) vProducts(); return ok;
+    },
+    body => {
+      const refresh = () => {
+        p.cat = $('#fCat').value; p.color = $('#fColor').value; $('#fImg').src = U.img(p, D);
+        const m = pct(+$('#fPrice').value, +$('#fCost').value);
+        $('#fMargin').innerHTML = `กำไรต่อชิ้น ฿${fmt(+$('#fPrice').value - +$('#fCost').value)} · <b class="${marginCls(m)}">${m.toFixed(1)}%</b>`;
+      };
+      body.querySelector('#fFile').onchange = async e => {
+        const f = e.target.files[0]; if (!f) return;
+        try { p.image = await CampStore.uploadImage(f); refresh(); } catch (err) { alert(err.message); }
+      };
+      body.querySelector('#fNoImg').onclick = () => { p.image = ''; refresh(); };
+      ['#fCat', '#fColor', '#fPrice', '#fCost'].forEach(s => body.querySelector(s).addEventListener('input', refresh));
+      refresh();
+    });
+}
+
+/* ================= ชุดสำเร็จรูป ================= */
+function vPresets() {
+  const groups = D.templates.map(t => ({ t, list: D.presets.filter(p => p.templateId === t.id) }));
+  const orphan = D.presets.filter(p => !T(p.templateId));
+  if (orphan.length) groups.push({ t: { id: '', name: 'ไม่ได้จัดกลุ่ม', counts: {} }, list: orphan });
+  const v = $('#view');
+  v.innerHTML = `
+    <div class="vh"><div><h2>ชุดสำเร็จรูป (Preset)</h2><p>ชุดที่พนักงานกดเลือกได้ทันที จัดกลุ่มตามรูปแบบชุด · ตั้ง “ราคาเซ็ต” เพื่อให้ส่วนลดอัตโนมัติ</p></div>
+      <button class="btn primary" id="addS">+ สร้างชุดใหม่</button></div>
+    ${groups.map(g => `<section class="pgroup"><h3>${esc(g.t.name)} <small>${esc(countLabel(g.t.counts))}</small></h3>
+      <div class="pcards">${g.list.map(presetCard).join('') || '<div class="empty-note">ยังไม่มีชุดในรูปแบบนี้</div>'}</div></section>`).join('')}`;
+  v.onclick = async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.id === 'addS') editPreset();
+    else if (b.dataset.edit) editPreset(b.dataset.edit);
+    else if (b.dataset.dup) {
+      const s = structuredClone(D.presets.find(x => x.id === b.dataset.dup));
+      s.id = U.uid('s'); s.name += ' (สำเนา)'; D.presets.push(s); await persist('คัดลอกชุดแล้ว'); vPresets();
+    } else if (b.dataset.del) {
+      const s = D.presets.find(x => x.id === b.dataset.del);
+      if (!confirm('ลบชุด “' + s.name + '”?')) return;
+      D.presets = D.presets.filter(x => x.id !== s.id); await persist('ลบแล้ว'); vPresets();
+    } else if (b.dataset.mv) {
+      const [id, dir] = b.dataset.mv.split(':'); const i = D.presets.findIndex(x => x.id === id); const j = i + +dir;
+      if (j < 0 || j >= D.presets.length) return;
+      [D.presets[i], D.presets[j]] = [D.presets[j], D.presets[i]]; await persist('จัดลำดับแล้ว'); vPresets();
+    }
+  };
+}
+function presetCard(s) {
+  const items = s.items.filter(P);
+  const sum = items.reduce((a, id) => a + P(id).price, 0), cost = items.reduce((a, id) => a + P(id).cost, 0);
+  const price = s.setPrice > 0 ? s.setPrice : sum, m = pct(price, cost);
+  const g = {}; items.forEach(id => g[id] = (g[id] || 0) + 1);
+  return `<div class="pcard">${s.badge ? `<span class="badge b-${esc(s.badge)}">${esc(s.badge)}</span>` : ''}
+    <b style="padding-right:56px">${esc(s.name)}</b>
+    <div class="preset-thumbs">${Object.entries(g).map(([id, q]) => `<span class="th"><img src="${U.img(P(id), D)}" alt=""><i>×${q}</i></span>`).join('')}</div>
+    <div class="muted" style="font-size:12px">${Object.entries(g).map(([id, q]) => esc(P(id).code) + ' ×' + q).join(' · ')}</div>
+    <div class="kv"><span>ราคารวมปกติ</span><span>฿${fmt(sum)}</span></div>
+    <div class="kv"><span>ราคาเซ็ต</span><b style="color:var(--ember)">฿${fmt(price)}</b></div>
+    <div class="kv"><span>ต้นทุน</span><span>฿${fmt(cost)}</span></div>
+    <div class="kv"><span>กำไร</span><b class="${marginCls(m)}">฿${fmt(price - cost)} (${m.toFixed(1)}%)</b></div>
+    <div class="acts"><button class="btn sm" data-edit="${s.id}">แก้ไข</button><button class="btn sm" data-dup="${s.id}">คัดลอก</button>
+      <button class="btn sm" data-mv="${s.id}:-1" title="เลื่อนขึ้น">↑</button><button class="btn sm" data-mv="${s.id}:1" title="เลื่อนลง">↓</button>
+      <button class="btn sm danger" data-del="${s.id}">ลบ</button></div></div>`;
+}
+function editPreset(id) {
+  const isNew = !id;
+  const s = isNew ? { id: U.uid('s'), name: '', badge: '', templateId: D.templates[0]?.id || '', items: [], setPrice: 0 }
+                  : structuredClone(D.presets.find(x => x.id === id));
+  let cur = s.items.filter(P).map(pid => ({ cat: P(pid).cat, pid }));
+  const rebuild = () => { // จัดช่องตามรูปแบบชุด โดยพยายามคงสินค้าเดิมไว้
+    const t = T(s.templateId); if (!t) return;
+    const pool = [...cur], out = [];
+    D.categories.forEach(c => {
+      for (let i = 0; i < (t.counts[c.id] || 0); i++) {
+        const k = pool.findIndex(x => x.cat === c.id);
+        out.push(k >= 0 ? pool.splice(k, 1)[0] : { cat: c.id, pid: D.products.find(p => p.cat === c.id)?.id || '' });
+      }
+    });
+    cur = out;
+  };
+  if (isNew || T(s.templateId)) rebuild();
+
+  openDlg(`<h3>${isNew ? 'สร้างชุดสำเร็จรูป' : 'แก้ไขชุด'}</h3>
+    <div class="form">
+      <label>ชื่อชุด *<input id="sName" required value="${esc(s.name)}" placeholder="เช่น Set A · เริ่มต้นคุ้มค่า"></label>
+      <div class="row2">
+        <label>รูปแบบชุด<select id="sTpl">${D.templates.map(t => `<option value="${t.id}" ${t.id === s.templateId ? 'selected' : ''}>${esc(t.name)} (${esc(countLabel(t.counts))})</option>`).join('')}</select></label>
+        <label>ป้าย<select id="sBadge">${['', 'ขายดี', 'แนะนำ', 'ใหม่', 'โปรโมชั่น'].map(b => `<option ${b === s.badge ? 'selected' : ''} value="${b}">${b || '— ไม่มี —'}</option>`).join('')}</select></label>
+      </div>
+      <label>เลือกสินค้าในแต่ละช่อง</label>
+      <div class="slot-ed" id="sSlots"></div>
+      <label>ราคาเซ็ต (บาท) — เว้นว่าง = ใช้ราคารวมปกติ<input id="sPrice" type="number" min="0" value="${s.setPrice || ''}"></label>
+      <div class="ptot" id="sTot"></div>
+    </div>`,
+    async () => {
+      if (cur.some(x => !x.pid)) { alert('ยังเลือกสินค้าไม่ครบทุกช่อง'); return false; }
+      Object.assign(s, { name: $('#sName').value.trim(), badge: $('#sBadge').value, templateId: $('#sTpl').value,
+        items: cur.map(x => x.pid), setPrice: +$('#sPrice').value || 0 });
+      if (isNew) D.presets.push(s); else D.presets[D.presets.findIndex(x => x.id === s.id)] = s;
+      const ok = await persist(); if (ok) vPresets(); return ok;
+    },
+    body => {
+      const drawSlots = () => {
+        const n = {};
+        body.querySelector('#sSlots').innerHTML = cur.map((x, i) => {
+          n[x.cat] = (n[x.cat] || 0) + 1;
+          const opts = D.products.filter(p => p.cat === x.cat);
+          return `<div class="se"><span>${esc(C(x.cat).name)} #${n[x.cat]}</span><img src="${x.pid ? U.img(P(x.pid), D) : ''}" alt="">
+            <select data-i="${i}">${opts.map(p => `<option value="${p.id}" ${p.id === x.pid ? 'selected' : ''}>${esc(p.code)} — ${esc(p.name)} (฿${fmt(p.price)})</option>`).join('')}</select></div>`;
+        }).join('') || '<span class="muted">รูปแบบนี้ไม่มีช่อง</span>';
+        drawTot();
+      };
+      const drawTot = () => {
+        const items = cur.filter(x => P(x.pid)).map(x => x.pid);
+        const sum = items.reduce((a, id) => a + P(id).price, 0), cost = items.reduce((a, id) => a + P(id).cost, 0);
+        const price = +$('#sPrice').value || sum, m = pct(price, cost);
+        body.querySelector('#sTot').innerHTML = `
+          <div class="kv"><span>ราคารวมปกติ</span><b>฿${fmt(sum)}</b></div>
+          <div class="kv"><span>ราคาเซ็ต</span><b style="color:var(--ember)">฿${fmt(price)}${price < sum ? ` <small class="muted">(ลด ฿${fmt(sum - price)})</small>` : ''}</b></div>
+          <div class="kv"><span>ต้นทุนรวม</span><span>฿${fmt(cost)}</span></div>
+          <div class="kv"><span>กำไร</span><b class="${marginCls(m)}">฿${fmt(price - cost)} (${m.toFixed(1)}%)</b></div>`;
+      };
+      body.querySelector('#sSlots').addEventListener('change', e => { const i = +e.target.dataset.i; cur[i].pid = e.target.value; drawSlots(); });
+      body.querySelector('#sTpl').addEventListener('change', e => { s.templateId = e.target.value; rebuild(); drawSlots(); });
+      body.querySelector('#sPrice').addEventListener('input', drawTot);
+      drawSlots();
+    });
+}
+
+/* ================= รูปแบบชุด ================= */
+function vTemplates() {
+  const v = $('#view');
+  v.innerHTML = `
+    <div class="vh"><div><h2>รูปแบบชุด (ช่องว่างบนกระดาน)</h2><p>กำหนดว่าชุดแต่ละแบบมีช่องโต๊ะ/เก้าอี้กี่ช่อง เช่น โต๊ะ 1 + เก้าอี้ 4 — พนักงานจะเห็นเป็นช่องเงาให้ลากสินค้าไปวาง</p></div>
+      <button class="btn primary" id="addT">+ เพิ่มรูปแบบ</button></div>
+    <div class="plist">${D.templates.map((t, i) => `<div class="prow" style="grid-template-columns:1fr auto auto">
+      <div class="pr-main"><b>${esc(t.name)}</b><small>${esc(countLabel(t.counts))} · ชุดสำเร็จรูป ${D.presets.filter(p => p.templateId === t.id).length} ชุด</small></div>
+      <div class="pr-act"><button class="btn sm" data-mv="${i}:-1">↑</button><button class="btn sm" data-mv="${i}:1">↓</button></div>
+      <div class="pr-act"><button class="btn sm" data-edit="${t.id}">แก้ไข</button><button class="btn sm danger" data-del="${t.id}">ลบ</button></div></div>`).join('')}</div>`;
+  v.onclick = async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.id === 'addT') editTemplate();
+    else if (b.dataset.edit) editTemplate(b.dataset.edit);
+    else if (b.dataset.mv) {
+      const [i, d] = b.dataset.mv.split(':').map(Number), j = i + d;
+      if (j < 0 || j >= D.templates.length) return;
+      [D.templates[i], D.templates[j]] = [D.templates[j], D.templates[i]]; await persist('จัดลำดับแล้ว'); vTemplates();
+    } else if (b.dataset.del) {
+      const t = T(b.dataset.del), used = D.presets.filter(p => p.templateId === t.id);
+      if (!confirm(`ลบรูปแบบ “${t.name}”?` + (used.length ? `\nชุดสำเร็จรูป ${used.length} ชุดในรูปแบบนี้จะถูกลบด้วย` : ''))) return;
+      D.templates = D.templates.filter(x => x.id !== t.id);
+      D.presets = D.presets.filter(p => p.templateId !== t.id);
+      await persist('ลบแล้ว'); vTemplates();
+    }
+  };
+}
+function editTemplate(id) {
+  const isNew = !id;
+  const t = isNew ? { id: U.uid('t'), name: '', counts: {} } : structuredClone(T(id));
+  openDlg(`<h3>${isNew ? 'เพิ่มรูปแบบชุด' : 'แก้ไขรูปแบบชุด'}</h3>
+    <div class="form">
+      <label>ชื่อรูปแบบ *<input id="tName" required value="${esc(t.name)}" placeholder="เช่น ชุด 4 ที่นั่ง"></label>
+      ${D.categories.map(c => `<label>จำนวนช่อง${esc(c.name)}<input type="number" min="0" max="30" data-c="${c.id}" value="${t.counts[c.id] || 0}"></label>`).join('')}
+    </div>`,
+    async () => {
+      t.name = $('#tName').value.trim(); t.counts = {};
+      document.querySelectorAll('#dlgBody [data-c]').forEach(i => { const n = +i.value || 0; if (n > 0) t.counts[i.dataset.c] = n; });
+      if (!Object.keys(t.counts).length) { alert('ต้องมีอย่างน้อย 1 ช่อง'); return false; }
+      if (isNew) D.templates.push(t); else D.templates[D.templates.findIndex(x => x.id === t.id)] = t;
+      const ok = await persist(); if (ok) vTemplates(); return ok;
+    });
+}
+
+/* ================= หมวดหมู่ ================= */
+function vCategories() {
+  const v = $('#view');
+  const iconName = { table: 'โต๊ะ (วางกลางกระดาน)', chair: 'เก้าอี้ (วางรอบโต๊ะ)', other: 'อื่นๆ (วางกลางกระดาน)' };
+  v.innerHTML = `
+    <div class="vh"><div><h2>หมวดหมู่สินค้า</h2><p>เพิ่มหมวดใหม่ได้ เช่น เต็นท์ ตะเกียง กระติก — แต่ละหมวดจะมีช่องของตัวเองบนกระดาน</p></div>
+      <button class="btn primary" id="addC">+ เพิ่มหมวดหมู่</button></div>
+    <div class="plist">${D.categories.map(c => `<div class="prow" style="grid-template-columns:60px 1fr auto">
+      <div style="width:56px;color:var(--moss)">${U.icon(c.icon, '#3f6b4f', 'fill')}</div>
+      <div class="pr-main"><b>${esc(c.name)}</b><small>รูปแบบบนกระดาน: ${iconName[c.icon] || c.icon} · สินค้า ${D.products.filter(p => p.cat === c.id).length} รายการ</small></div>
+      <div class="pr-act"><button class="btn sm" data-edit="${c.id}">แก้ไข</button><button class="btn sm danger" data-del="${c.id}">ลบ</button></div></div>`).join('')}</div>`;
+  v.onclick = async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.id === 'addC') editCategory();
+    else if (b.dataset.edit) editCategory(b.dataset.edit);
+    else if (b.dataset.del) {
+      const c = C(b.dataset.del), n = D.products.filter(p => p.cat === c.id).length;
+      if (n) { alert(`หมวด “${c.name}” ยังมีสินค้า ${n} รายการ กรุณาย้ายหรือลบสินค้าก่อน`); return; }
+      if (!confirm(`ลบหมวด “${c.name}”?`)) return;
+      D.categories = D.categories.filter(x => x.id !== c.id);
+      D.templates.forEach(t => delete t.counts[c.id]);
+      await persist('ลบแล้ว'); vCategories();
+    }
+  };
+}
+function editCategory(id) {
+  const isNew = !id;
+  const c = isNew ? { id: U.uid('c'), name: '', icon: 'other' } : { ...C(id) };
+  openDlg(`<h3>${isNew ? 'เพิ่มหมวดหมู่' : 'แก้ไขหมวดหมู่'}</h3>
+    <div class="form">
+      <label>ชื่อหมวดหมู่ *<input id="cName" required value="${esc(c.name)}" placeholder="เช่น เต็นท์"></label>
+      <label>รูปแบบไอคอน / ตำแหน่งบนกระดาน<select id="cIcon">
+        <option value="table" ${c.icon === 'table' ? 'selected' : ''}>โต๊ะ — วางกลางกระดาน</option>
+        <option value="chair" ${c.icon === 'chair' ? 'selected' : ''}>เก้าอี้ — วางเป็นวงรอบโต๊ะ</option>
+        <option value="other" ${c.icon === 'other' ? 'selected' : ''}>อื่นๆ — วางกลางกระดาน</option></select></label>
+    </div>`,
+    async () => {
+      c.name = $('#cName').value.trim(); c.icon = $('#cIcon').value;
+      if (isNew) D.categories.push(c); else D.categories[D.categories.findIndex(x => x.id === c.id)] = c;
+      const ok = await persist(); if (ok) vCategories(); return ok;
+    });
+}
+
+/* ================= ตั้งค่า ================= */
+function vSettings() {
+  const st = D.settings, v = $('#view');
+  v.innerHTML = `
+    <div class="vh"><div><h2>ตั้งค่า</h2></div></div>
+    <div class="box"><h3>ร้าน & รหัสเข้าใช้</h3>
+      <div class="form" style="max-width:420px">
+        <label>ชื่อร้าน<input id="stName" value="${esc(st.shopName)}"></label>
+        <label>รหัสพนักงานขาย<input id="stSales" value="${esc(st.salesCode)}"></label>
+        <label>รหัสผู้ดูแล<input id="stAdmin" value="${esc(st.adminCode)}"></label>
+        <div><button class="btn primary" id="stSave">บันทึก</button></div>
+      </div></div>
+    <div class="box"><h3>สำรอง / ย้ายข้อมูล</h3>
+      <p class="muted" style="margin-top:0">ตอนนี้ข้อมูลเก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — ใช้ “ส่งออก” แล้ว “นำเข้า” ในเครื่องพนักงาน เพื่อให้ข้อมูลตรงกัน (เมื่อต่อ Firebase แล้วจะซิงก์ให้อัตโนมัติ)</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="exp">⬇️ ส่งออกไฟล์ JSON</button>
+        <label class="btn">⬆️ นำเข้าไฟล์ JSON<input type="file" id="imp" accept=".json,application/json" hidden></label>
+        <button class="btn danger" id="rst">รีเซ็ตเป็นข้อมูลตัวอย่าง</button>
+      </div></div>`;
+  $('#stSave').onclick = async () => {
+    const s = $('#stSales').value.trim(), a = $('#stAdmin').value.trim();
+    if (!s || !a) return alert('รหัสห้ามว่าง');
+    if (s === a) return alert('รหัสพนักงานกับผู้ดูแลต้องไม่ซ้ำกัน');
+    Object.assign(st, { shopName: $('#stName').value.trim() || 'CampSet', salesCode: s, adminCode: a });
+    await persist(); $('#shopName').textContent = st.shopName;
+  };
+  $('#exp').onclick = () => {
+    const blob = new Blob([JSON.stringify(D, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `campset-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+  };
+  $('#imp').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const obj = JSON.parse(await f.text());
+      if (!Array.isArray(obj.products) || !Array.isArray(obj.categories) || !obj.settings) throw new Error('รูปแบบไฟล์ไม่ถูกต้อง');
+      obj.templates ||= []; obj.presets ||= [];
+      if (!confirm('นำเข้าจะเขียนทับข้อมูลทั้งหมดในเครื่องนี้ ยืนยัน?')) return;
+      D = obj; await persist('นำเข้าข้อมูลแล้ว'); $('#shopName').textContent = D.settings.shopName; render();
+    } catch (err) { alert('นำเข้าไม่สำเร็จ: ' + err.message); }
+  };
+  $('#rst').onclick = async () => {
+    if (!confirm('ลบข้อมูลทั้งหมดและกลับไปใช้ข้อมูลตัวอย่าง?')) return;
+    D = await CampStore.reset(); await persist('รีเซ็ตแล้ว'); $('#shopName').textContent = D.settings.shopName; render();
+  };
+}
+</script>
+</body>
+</html>

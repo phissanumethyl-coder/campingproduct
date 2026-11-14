@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CampSet — จัดชุดอุปกรณ์แคมปิ้ง</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand">⛺ <span id="shopName">CampSet</span> <small>จัดชุดขาย</small></div>
+    <div class="top-actions">
+      <label class="switch"><input type="checkbox" id="hideCost"> โหมดลูกค้า (ซ่อนต้นทุน)</label>
+      <a href="admin.html" class="btn sm">ผู้ดูแล</a>
+      <button class="btn sm" id="logout">ออกจากระบบ</button>
+    </div>
+  </header>
+
+  <main class="sales-layout">
+    <section class="stage">
+      <div class="step"><span class="step-n">1</span> เลือกรูปแบบชุด</div>
+      <div id="templates" class="chips"></div>
+
+      <div class="step"><span class="step-n">2</span> กดเลือกชุดสำเร็จรูป <span class="muted">หรือลากสินค้าจากแคตตาล็อกมาวางในช่องเอง</span></div>
+      <div id="presets" class="presets"></div>
+
+      <div class="board-wrap">
+        <div class="board-tools">
+          <span class="info" id="slotInfo"></span>
+          <span id="addSlotBtns"></span>
+          <button class="btn sm danger" id="clearBoard">ล้างสินค้าในช่อง</button>
+        </div>
+        <div id="board" class="board"></div>
+        <p class="hint">ลากสินค้าวางลงช่อง · แตะสินค้าในแคตตาล็อกเพื่อใส่ช่องว่างถัดไป · ลากสินค้าในช่องไปช่องอื่นเพื่อสลับ หรือลากออกนอกกระดานเพื่อเอาออก · ปุ่ม ⇉ = ใช้ตัวนี้กับทุกช่องที่ว่าง</p>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="panel catalog">
+        <div class="panel-h">แคตตาล็อก <input id="search" type="search" placeholder="ค้นหารหัส / ชื่อ"></div>
+        <div id="catTabs" class="tabs"></div>
+        <div id="catalog" class="catalog-grid"></div>
+      </div>
+      <div class="panel summary" id="summary"></div>
+    </aside>
+  </main>
+</div>
+
+<script src="store.js"></script>
+<script>
+const U = CampUI;
+let D;
+const S = { templateId: null, slots: [], presetId: null, modified: false, discount: 0, cat: null, q: '' };
+const $ = s => document.querySelector(s);
+const P = id => D.products.find(p => p.id === id);
+const C = id => D.categories.find(c => c.id === id) || { id, name: id, icon: 'other' };
+const kindOf = cat => C(cat).icon;
+
+CampAuth.require('sales', init);
+
+async function init() {
+  D = await CampStore.load();
+  $('#shopName').textContent = D.settings.shopName;
+  document.title = D.settings.shopName + ' — จัดชุดอุปกรณ์แคมปิ้ง';
+  S.cat = D.categories[0]?.id;
+  const hc = sessionStorage.getItem('campset_hidecost') === '1';
+  $('#hideCost').checked = hc; document.body.classList.toggle('hide-cost', hc);
+  bind();
+  selectTemplate(D.templates[0]?.id || 'custom');
+  renderCatTabs(); renderCatalog();
+}
+
+/* ---------------- helpers ---------------- */
+function group(pids) {
+  const m = new Map();
+  pids.forEach(id => { if (P(id)) m.set(id, (m.get(id) || 0) + 1); });
+  return [...m].map(([pid, qty]) => ({ pid, qty, p: P(pid) }));
+}
+const sumOf = pids => pids.reduce((a, id) => a + (P(id)?.price || 0), 0);
+const costOf = pids => pids.reduce((a, id) => a + (P(id)?.cost || 0), 0);
+const marginCls = m => m >= 35 ? 'good' : m >= 20 ? 'mid' : 'bad';
+function countLabel(counts) {
+  return D.categories.filter(c => counts?.[c.id]).map(c => `${c.name} ${counts[c.id]}`).join(' + ');
+}
+function slotsFromCounts(counts) {
+  const out = [];
+  D.categories.forEach(c => { for (let i = 0; i < (counts?.[c.id] || 0); i++) out.push({ cat: c.id, pid: null }); });
+  return out;
+}
+
+/* ---------------- templates & presets ---------------- */
+function selectTemplate(id) {
+  S.templateId = id; S.presetId = null; S.modified = false; S.discount = 0;
+  const t = D.templates.find(x => x.id === id);
+  S.slots = t ? slotsFromCounts(t.counts) : [];
+  renderTemplates(); renderPresets(); renderBoard(); renderSummary(); renderCatalog();
+}
+function renderTemplates() {
+  $('#templates').innerHTML = D.templates.map(t =>
+    `<button class="chip ${t.id === S.templateId ? 'on' : ''}" data-t="${t.id}"><b>${U.esc(t.name)}</b><small>${U.esc(countLabel(t.counts))}</small></button>`
+  ).join('') + `<button class="chip ${S.templateId === 'custom' ? 'on' : ''}" data-t="custom"><b>จัดเอง</b><small>เริ่มจากกระดานว่าง</small></button>`;
+}
+function renderPresets() {
+  const list = S.templateId === 'custom' ? D.presets : D.presets.filter(p => p.templateId === S.templateId);
+  if (!list.length) { $('#presets').innerHTML = `<div class="empty-note">ยังไม่มีชุดสำเร็จรูปสำหรับรูปแบบนี้ — ลากสินค้าลงช่องว่างด้านล่างได้เลย</div>`; return; }
+  $('#presets').innerHTML = list.map(pr => {
+    const items = pr.items.filter(P), sum = sumOf(items), cost = costOf(items);
+    const price = pr.setPrice > 0 ? pr.setPrice : sum;
+    const m = price ? (price - cost) / price * 100 : 0;
+    const g = group(items);
+    return `<button class="preset ${pr.id === S.presetId ? 'on' : ''}" data-p="${pr.id}">
+      ${pr.badge ? `<span class="badge b-${U.esc(pr.badge)}">${U.esc(pr.badge)}</span>` : ''}
+      <div class="preset-name">${U.esc(pr.name)}</div>
+      <div class="preset-thumbs">${g.map(x => `<span class="th"><img src="${U.img(x.p, D)}" alt=""><i>×${x.qty}</i></span>`).join('')}</div>
+      <div class="preset-items">${g.map(x => `${U.esc(x.p.code)} ×${x.qty}`).join(' · ')}</div>
+      <div class="preset-price">${price < sum ? `<s>฿${U.fmt(sum)}</s>` : ''}฿${U.fmt(price)}</div>
+      <div class="cost">ทุน ฿${U.fmt(cost)} · กำไร <b class="${marginCls(m)}">${m.toFixed(0)}%</b></div>
+    </button>`;
+  }).join('');
+}
+function loadPreset(id) {
+  const pr = D.presets.find(p => p.id === id); if (!pr) return;
+  const items = pr.items.filter(P);
+  S.presetId = id; S.modified = false;
+  S.slots = items.map(pid => ({ cat: P(pid).cat, pid }));
+  const sum = sumOf(items);
+  S.discount = pr.setPrice > 0 ? Math.max(0, sum - pr.setPrice) : 0;
+  renderPresets(); renderBoard(true); renderSummary(); renderCatalog();
+  U.toast('โหลด ' + pr.name);
+}
+
+/* ---------------- board ---------------- */
+function slotHTML(i, style = '') {
+  const s = S.slots[i], p = s.pid && P(s.pid), k = kindOf(s.cat), cn = C(s.cat).name;
+  const cls = `slot k-${k} ${p ? 'filled' : ''} ${style ? 'abs' : ''}`;
+  if (!p) return `<div class="${cls}" data-i="${i}" style="${style}">
+      <div class="sil">${U.icon(k, null, 'ghost')}</div><span class="slot-l">วาง${U.esc(cn)}</span>
+      <button class="del" data-act="del" title="ลบช่องนี้">−</button></div>`;
+  return `<div class="${cls}" data-i="${i}" style="${style}">
+      <img src="${U.img(p, D)}" alt="" draggable="false">
+      <div class="slot-code">${U.esc(p.code)}</div><div class="slot-price">฿${U.fmt(p.price)}</div>
+      <div class="slot-acts"><button data-act="fill" title="ใช้ตัวนี้กับทุกช่อง${U.esc(cn)}ที่ว่าง">⇉</button><button data-act="rm" title="เอาออก">×</button></div></div>`;
+}
+function renderBoard(popAll, popIndex) {
+  const b = $('#board');
+  const around = [], center = [];
+  S.slots.forEach((s, i) => (kindOf(s.cat) === 'chair' ? around : center).push(i));
+  const n = around.length;
+  let html = `<div class="mat"></div><div class="board-center">${center.map(i => slotHTML(i)).join('')}</div>`;
+  const start = -Math.PI / 2 + Math.PI / Math.max(n, 1);
+  const rx = b.clientWidth < 520 ? 37 : 41, ry = 37;
+  around.forEach((i, k) => {
+    const a = start + (2 * Math.PI * k) / n;
+    const x = 50 + rx * Math.cos(a), y = 50 + ry * Math.sin(a);
+    html += slotHTML(i, `left:${x.toFixed(2)}%;top:${y.toFixed(2)}%`);
+  });
+  if (!S.slots.length) html += `<div class="board-empty">กระดานว่าง — กด “+ ช่อง” ด้านบน<br>หรือแตะ/ลากสินค้าจากแคตตาล็อกมาวางที่นี่</div>`;
+  b.innerHTML = html;
+  b.style.setProperty('--slot', n > 10 ? '66px' : n > 8 ? '74px' : n > 6 ? '84px' : '92px');
+  if (popAll) b.querySelectorAll('.slot.filled').forEach(el => el.classList.add('pop'));
+  if (popIndex != null) b.querySelector(`.slot[data-i="${popIndex}"]`)?.classList.add('pop');
+
+  const filled = S.slots.filter(s => s.pid).length;
+  $('#slotInfo').innerHTML = `จัดแล้ว ${filled}/${S.slots.length} <small>ช่อง</small>`;
+  $('#addSlotBtns').innerHTML = D.categories.map(c => `<button class="btn sm" data-add="${c.id}">+ ช่อง${U.esc(c.name)}</button>`).join(' ');
+}
+function changed(popIndex) {
+  S.modified = true;
+  renderBoard(false, popIndex); renderSummary(); renderCatalog();
+}
+function autoPlace(pid) {
+  const p = P(pid); if (!p) return;
+  let i = S.slots.findIndex(s => s.cat === p.cat && !s.pid);
+  if (i < 0) { S.slots.push({ cat: p.cat, pid }); i = S.slots.length - 1; U.toast(`เพิ่มช่อง${C(p.cat).name}ใหม่ + ${p.code}`); }
+  else S.slots[i].pid = pid;
+  changed(i);
+}
+
+/* ---------------- drag engine (mouse + touch) ---------------- */
+let pend = null, drag = null;
+function onDown(e, src) {
+  if (e.button > 0 || e.target.closest('button')) return;
+  if (e.pointerType === 'mouse') e.preventDefault();
+  pend = { src, x: e.clientX, y: e.clientY, type: e.pointerType, el: e.currentTarget || e.target };
+  if (e.pointerType !== 'mouse') pend.timer = setTimeout(() => pend && begin(pend.x, pend.y), 180); // แตะค้างเพื่อลาก
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onCancel);
+}
+function begin(x, y) {
+  const p = P(pend.src.pid); if (!p) return cleanup();
+  clearTimeout(pend.timer);
+  drag = { src: pend.src, card: pend.el };
+  pend = null;
+  const g = document.createElement('div');
+  g.className = 'drag-ghost';
+  g.innerHTML = `<img src="${U.img(p, D)}" alt=""><b>${U.esc(p.code)}</b>`;
+  document.body.appendChild(g); drag.ghost = g;
+  document.body.classList.add('dragging');
+  drag.card?.classList.add('lift');
+  document.querySelectorAll('#board .slot').forEach(el => {
+    el.classList.toggle('can', S.slots[+el.dataset.i].cat === p.cat);
+  });
+  navigator.vibrate?.(12);
+  moveGhost(x, y);
+}
+function targetAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  return { slot: el?.closest('#board .slot'), board: el?.closest('#board') };
+}
+function moveGhost(x, y) {
+  drag.ghost.style.transform = `translate(${x - 44}px,${y - 50}px) rotate(-4deg)`;
+  const { slot, board } = targetAt(x, y);
+  document.querySelectorAll('#board .slot.over').forEach(el => el !== slot && el.classList.remove('over', 'no'));
+  if (slot) { slot.classList.add('over'); slot.classList.toggle('no', !slot.classList.contains('can')); }
+  $('#board').classList.toggle('out-hint', drag.src.from != null && !board);
+}
+function onMove(e) {
+  if (drag) { moveGhost(e.clientX, e.clientY); return; }
+  if (!pend) return;
+  const d = Math.hypot(e.clientX - pend.x, e.clientY - pend.y);
+  if (pend.type === 'mouse') { if (d > 5) begin(e.clientX, e.clientY); }
+  else if (d > 10) cleanup(); // นิ้วเลื่อน = เลื่อนหน้าจอ ไม่ใช่ลาก
+}
+function onUp(e) {
+  if (drag) drop(e.clientX, e.clientY);
+  else if (pend && pend.src.from == null) autoPlace(pend.src.pid); // แตะ = ใส่ช่องว่างถัดไป
+  cleanup();
+}
+function onCancel() { cleanup(); }
+function cleanup() {
+  if (pend) clearTimeout(pend.timer);
+  pend = null;
+  if (drag) { drag.ghost.remove(); drag.card?.classList.remove('lift'); drag = null; }
+  document.body.classList.remove('dragging');
+  $('#board').classList.remove('out-hint');
+  document.querySelectorAll('#board .slot').forEach(el => el.classList.remove('can', 'over', 'no'));
+  window.removeEventListener('pointermove', onMove);
+  window.removeEventListener('pointerup', onUp);
+  window.removeEventListener('pointercancel', onCancel);
+}
+function drop(x, y) {
+  const { src } = drag, p = P(src.pid);
+  const { slot, board } = targetAt(x, y);
+  if (slot) {
+    const i = +slot.dataset.i;
+    if (S.slots[i].cat !== p.cat) { U.toast(`ช่องนี้สำหรับ${C(S.slots[i].cat).name}เท่านั้น`); return; }
+    if (src.from != null) { // ย้าย/สลับระหว่างช่อง
+      if (src.from === i) return;
+      S.slots[src.from].pid = S.slots[i].pid; S.slots[i].pid = src.pid;
+    } else S.slots[i].pid = src.pid;
+    changed(i);
+  } else if (board && src.from == null) {
+    autoPlace(src.pid);
+  } else if (!board && src.from != null) {
+    S.slots[src.from].pid = null; changed(); U.toast('เอา ' + p.code + ' ออกแล้ว');
+  }
+}
+document.addEventListener('touchmove', e => { if (drag) e.preventDefault(); }, { passive: false });
+
+/* ---------------- catalog ---------------- */
+function renderCatTabs() {
+  $('#catTabs').innerHTML = D.categories.map(c =>
+    `<button class="tab ${c.id === S.cat && !S.q ? 'on' : ''}" data-c="${c.id}">${U.esc(c.name)} <small>${D.products.filter(p => p.cat === c.id).length}</small></button>`).join('');
+}
+function renderCatalog() {
+  const q = S.q.trim().toLowerCase();
+  const list = D.products.filter(p => q ? (p.code + ' ' + p.name + ' ' + (p.size || '')).toLowerCase().includes(q) : p.cat === S.cat);
+  const used = {}; S.slots.forEach(s => s.pid && (used[s.pid] = (used[s.pid] || 0) + 1));
+  $('#catalog').innerHTML = list.map(p => `<div class="card" data-pid="${p.id}">
+      ${used[p.id] ? `<span class="inuse">×${used[p.id]}</span>` : ''}
+      <img src="${U.img(p, D)}" alt="" draggable="false">
+      <div class="c-code">${U.esc(p.code)}</div>
+      <div class="c-name">${U.esc(p.name)}${p.size ? ' · ' + U.esc(p.size) : ''}</div>
+      <div class="c-price">฿${U.fmt(p.price)}</div>
+      <div class="cost">ทุน ฿${U.fmt(p.cost)}</div>
+    </div>`).join('') || '<p class="muted">ไม่พบสินค้า</p>';
+}
+
+/* ---------------- summary ---------------- */
+function renderSummary() {
+  const pids = S.slots.filter(s => s.pid && P(s.pid)).map(s => s.pid);
+  const empty = S.slots.length - pids.length;
+  const pr = S.presetId && D.presets.find(x => x.id === S.presetId);
+  const g = group(pids);
+  $('#summary').innerHTML = `
+    <div class="panel-h">สรุปชุดที่จัด <span class="tag">${pr ? U.esc(pr.name) + (S.modified ? ' · ปรับแต่ง' : '') : 'จัดเอง'}</span></div>
+    ${empty ? `<div class="warn">ยังมีช่องว่าง ${empty} ช่อง</div>` : ''}
+    ${g.length ? `<div class="lines">${g.map(x => `<div class="line">
+        <img src="${U.img(x.p, D)}" alt="">
+        <div class="ln-main"><b>${U.esc(x.p.code)}</b> ${U.esc(x.p.name)}<small>฿${U.fmt(x.p.price)}/ชิ้น<span class="cost"> · ทุน ฿${U.fmt(x.p.cost)}</span></small></div>
+        <div class="ln-qty">×${x.qty}</div><div class="ln-amt">฿${U.fmt(x.p.price * x.qty)}</div></div>`).join('')}</div>`
+      : '<p class="muted">ยังไม่มีสินค้าในชุด</p>'}
+    <div class="tot-row"><span>ราคารวม</span><b id="tSum"></b></div>
+    <div class="tot-row"><span>ส่วนลด</span><span class="disc">฿<input id="disc" type="number" min="0" inputmode="numeric" placeholder="0" value="${S.discount || ''}"></span></div>
+    <div class="tot-net"><span>ราคาขายสุทธิ</span><b id="tNet"></b></div>
+    <div class="costbox cost">
+      <div class="tot-row"><span>ต้นทุนรวม</span><b id="tCost"></b></div>
+      <div class="tot-row"><span>กำไร</span><b id="tProfit"></b></div>
+      <div class="meter"><i id="tMeter"></i></div>
+    </div>
+    <div class="sum-actions"><button class="btn primary" id="copyQuote">📋 คัดลอกข้อความเสนอราคา</button></div>`;
+  updateTotals();
+}
+function totals() {
+  const pids = S.slots.filter(s => s.pid && P(s.pid)).map(s => s.pid);
+  const sum = sumOf(pids), cost = costOf(pids), net = Math.max(0, sum - S.discount), profit = net - cost;
+  return { pids, sum, cost, net, profit, m: net ? profit / net * 100 : 0 };
+}
+function updateTotals() {
+  const t = totals();
+  $('#tSum').textContent = '฿' + U.fmt(t.sum);
+  $('#tNet').textContent = '฿' + U.fmt(t.net);
+  $('#tCost').textContent = '฿' + U.fmt(t.cost);
+  $('#tProfit').innerHTML = `฿${U.fmt(t.profit)} <small>(${t.m.toFixed(1)}%)</small>`;
+  $('#tProfit').className = marginCls(t.m);
+  const bar = $('#tMeter');
+  bar.style.width = Math.max(0, Math.min(100, t.m * 2)) + '%';
+  bar.style.background = getComputedStyle(document.documentElement).getPropertyValue(t.m >= 35 ? '--ok' : t.m >= 20 ? '--warn' : '--danger');
+}
+function quoteText() {
+  const t = totals(), pr = S.presetId && D.presets.find(x => x.id === S.presetId);
+  const lines = group(t.pids).map(x => `• ${x.p.code} ${x.p.name} ×${x.qty} = ${U.fmt(x.p.price * x.qty)} บาท`);
+  return [`⛺ ${D.settings.shopName} — เสนอราคาชุดแคมปิ้ง`, pr ? `ชุด: ${pr.name}${S.modified ? ' (ปรับแต่ง)' : ''}` : '', ...lines, '',
+    `ราคารวม ${U.fmt(t.sum)} บาท`, S.discount ? `ส่วนลด ${U.fmt(S.discount)} บาท` : '', `ราคาชุด ${U.fmt(t.net)} บาท`]
+    .filter((l, i) => l !== '' || i > 0).join('\n').replace(/\n{3,}/g, '\n\n');
+}
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+  U.toast('คัดลอกแล้ว — วางใน LINE ได้เลย');
+}
+
+/* ---------------- events ---------------- */
+function bind() {
+  $('#templates').addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (b) selectTemplate(b.dataset.t); });
+  $('#presets').addEventListener('click', e => { const b = e.target.closest('[data-p]'); if (b) loadPreset(b.dataset.p); });
+  $('#catTabs').addEventListener('click', e => {
+    const b = e.target.closest('[data-c]'); if (!b) return;
+    S.cat = b.dataset.c; S.q = ''; $('#search').value = ''; renderCatTabs(); renderCatalog();
+  });
+  $('#search').addEventListener('input', e => { S.q = e.target.value; renderCatTabs(); renderCatalog(); });
+  $('#catalog').addEventListener('pointerdown', e => { const c = e.target.closest('.card'); if (c) onDown(e, { pid: c.dataset.pid }); });
+  $('#catalog').addEventListener('contextmenu', e => e.preventDefault());
+  $('#board').addEventListener('pointerdown', e => {
+    const sl = e.target.closest('.slot.filled'); if (!sl) return;
+    const i = +sl.dataset.i; onDown(e, { pid: S.slots[i].pid, from: i });
+  });
+  $('#board').addEventListener('contextmenu', e => e.preventDefault());
+  $('#board').addEventListener('click', e => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    const i = +b.closest('.slot').dataset.i, s = S.slots[i];
+    if (b.dataset.act === 'rm') { s.pid = null; changed(); }
+    else if (b.dataset.act === 'del') { S.slots.splice(i, 1); changed(); }
+    else if (b.dataset.act === 'fill') {
+      let n = 0; S.slots.forEach(x => { if (x.cat === s.cat && !x.pid) { x.pid = s.pid; n++; } });
+      changed(); renderBoard(true); U.toast(n ? `ใส่ ${P(s.pid).code} เพิ่ม ${n} ช่อง` : 'ไม่มีช่องว่างแล้ว');
+    }
+  });
+  $('#addSlotBtns').addEventListener('click', e => {
+    const b = e.target.closest('[data-add]'); if (!b) return;
+    S.slots.push({ cat: b.dataset.add, pid: null }); changed();
+  });
+  $('#clearBoard').addEventListener('click', () => { S.slots.forEach(s => s.pid = null); S.discount = 0; S.presetId = null; renderPresets(); changed(); });
+  $('#summary').addEventListener('input', e => { if (e.target.id === 'disc') { S.discount = Math.max(0, +e.target.value || 0); updateTotals(); } });
+  $('#summary').addEventListener('click', e => { if (e.target.closest('#copyQuote')) copy(quoteText()); });
+  $('#hideCost').addEventListener('change', e => {
+    document.body.classList.toggle('hide-cost', e.target.checked);
+    sessionStorage.setItem('campset_hidecost', e.target.checked ? '1' : '0');
+  });
+  $('#logout').addEventListener('click', () => CampAuth.logout());
+  // ถ้าผู้ดูแลแก้ข้อมูลในแท็บอื่น ให้โหลดใหม่
+  let rw; window.addEventListener('resize', () => { clearTimeout(rw); rw = setTimeout(() => renderBoard(), 150); });
+  window.addEventListener('storage', async () => { D = await CampStore.load(); renderTemplates(); renderPresets(); renderCatTabs(); renderCatalog(); renderBoard(); renderSummary(); });
+}
+</script>
+</body>
+</html>
