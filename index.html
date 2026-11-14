@@ -6,7 +6,7 @@
 <title>CampSet — จัดชุดอุปกรณ์แคมปิ้ง</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div id="app" hidden>
@@ -33,6 +33,7 @@
         <span class="info" id="slotInfo"></span>
         <span id="addSlotBtns"></span>
         <button class="btn sm danger" id="clearBoard">ล้างสินค้าในช่อง</button>
+        <button class="btn sm" id="resetSlots" title="กลับเป็นช่องตั้งต้นของรูปแบบชุดที่เลือก">↺ รีเซ็ตช่อง</button>
       </div>
       <div class="quick" id="quick"></div>
       <div id="board" class="board"></div>
@@ -49,7 +50,8 @@
   </main>
 </div>
 
-<script src="store.js?v=4"></script>
+<div id="tip" class="tip" hidden></div>
+<script src="store.js?v=5"></script>
 <script>
 const U = CampUI;
 let D;
@@ -58,6 +60,7 @@ const $ = s => document.querySelector(s);
 const P = id => D.products.find(p => p.id === id);
 const C = id => D.categories.find(c => c.id === id) || { id, name: id, icon: 'other' };
 const kindOf = cat => C(cat).icon;
+const DEFAULT_COUNTS = { table: 1, chair: 2 }; // ใช้ตอนรีเซ็ตในโหมด "จัดเอง"
 
 CampAuth.require('sales', init);
 
@@ -140,11 +143,11 @@ function slotHTML(i, style = '') {
   const cls = `slot k-${k} ${p ? 'filled' : ''} ${style ? 'abs' : ''}`;
   if (!p) return `<div class="${cls}" data-i="${i}" style="${style}">
       <div class="sil">${U.icon(k, null, 'ghost')}</div><span class="slot-l">วาง${U.esc(cn)}</span>
-      <button class="del" data-act="del" title="ลบช่องนี้">−</button></div>`;
+      <button class="del" data-act="del" title="ลบช่องนี้"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></button></div>`;
   return `<div class="${cls}" data-i="${i}" style="${style}">
       <img src="${U.img(p, D)}" alt="" draggable="false">
       <div class="slot-code">${U.esc(p.code)}</div><div class="slot-price">฿${U.fmt(p.price)}</div>
-      <div class="slot-acts"><button data-act="fill" title="ใช้ตัวนี้กับทุกช่อง${U.esc(cn)}ที่ว่าง">⇉</button><button data-act="rm" title="เอาออก">×</button></div></div>`;
+      <div class="slot-acts"><button data-act="fill" title="ใช้ตัวนี้กับทุกช่อง${U.esc(cn)}ที่ว่าง">⇉</button><button data-act="rm" title="เอาสินค้าออกจากช่อง"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></button></div></div>`;
 }
 function renderBoard(popAll, popIndex) {
   const b = $('#board');
@@ -193,6 +196,7 @@ function onDown(e, src) {
   window.addEventListener('pointercancel', onCancel);
 }
 function begin(x, y) {
+  hideTip();
   const p = P(pend.src.pid); if (!p) return cleanup();
   clearTimeout(pend.timer);
   drag = { src: pend.src, card: pend.el };
@@ -281,6 +285,29 @@ function renderCatalog() {
       <div class="cost">ทุน ฿${U.fmt(p.cost)}</div>
     </div>`).join('') || '<p class="muted">ไม่พบสินค้า</p>';
 }
+
+/* ---------------- tooltip ---------------- */
+function showTip(p, x, y) {
+  if (!p) return hideTip();
+  const tip = $('#tip');
+  if (tip.dataset.pid !== p.id) {
+    const m = p.price ? (p.price - p.cost) / p.price * 100 : 0;
+    tip.innerHTML = `<img src="${U.img(p, D)}" alt="">
+      <div class="tip-b"><div class="tip-code">${U.esc(p.code)} <span>${U.esc(C(p.cat).name)}</span></div>
+      <div class="tip-name">${U.esc(p.name)}</div>${p.size ? `<div class="tip-size">${U.esc(p.size)}</div>` : ''}
+      <div class="tip-row"><span>ราคาขาย</span><b class="tip-price">฿${U.fmt(p.price)}</b></div>
+      <div class="tip-row cost"><span>ต้นทุน</span><b>฿${U.fmt(p.cost)}</b></div>
+      <div class="tip-row cost"><span>กำไร/ชิ้น</span><b class="${marginCls(m)}">฿${U.fmt(p.price - p.cost)} (${m.toFixed(0)}%)</b></div></div>`;
+    tip.dataset.pid = p.id;
+  }
+  tip.hidden = false;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let left = x + 18, top = y + 18;
+  if (left + w > innerWidth - 8) left = x - w - 18;
+  if (top + h > innerHeight - 8) top = y - h - 18;
+  tip.style.transform = `translate(${Math.max(8, left)}px,${Math.max(8, top)}px)`;
+}
+function hideTip() { const t = $('#tip'); if (!t.hidden) { t.hidden = true; t.dataset.pid = ''; } }
 
 /* ---------------- summary ---------------- */
 function renderSummary() {
@@ -375,6 +402,20 @@ function bind() {
     S.slots.push({ cat: b.dataset.add, pid: null }); changed();
   });
   $('#clearBoard').addEventListener('click', () => { S.slots.forEach(s => s.pid = null); S.discount = 0; S.presetId = null; renderPresets(); changed(); });
+  $('#resetSlots').addEventListener('click', () => {
+    const t = D.templates.find(x => x.id === S.templateId);
+    S.slots = slotsFromCounts(t ? t.counts : DEFAULT_COUNTS);
+    S.discount = 0; S.presetId = null; S.modified = false;
+    renderPresets(); renderBoard(); renderSummary(); renderCatalog();
+    U.toast('รีเซ็ตช่องเป็น ' + countLabel(t ? t.counts : DEFAULT_COUNTS));
+  });
+  // ป้ายรายละเอียดสินค้าเมื่อชี้เมาส์ที่ช่อง
+  $('#board').addEventListener('mousemove', e => {
+    const sl = e.target.closest('.slot.filled');
+    if (!sl || drag || pend || e.target.closest('button')) return hideTip();
+    showTip(P(S.slots[+sl.dataset.i].pid), e.clientX, e.clientY);
+  });
+  $('#board').addEventListener('mouseleave', hideTip);
   $('#summary').addEventListener('input', e => { if (e.target.id === 'disc') { S.discount = Math.max(0, +e.target.value || 0); updateTotals(); } });
   $('#summary').addEventListener('click', e => { if (e.target.closest('#copyQuote')) copy(quoteText()); });
   $('#hideCost').addEventListener('change', e => {
