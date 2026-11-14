@@ -47,16 +47,16 @@ input,select{font:inherit}
 @keyframes shake{25%{transform:translateX(-8px)}50%{transform:translateX(8px)}75%{transform:translateX(-4px)}}
 
 /* ============ SALES ============ */
-.sales-layout{display:grid;grid-template-columns:minmax(0,1fr) 380px;grid-template-areas:"top top" "board cat" "sum sum";gap:16px;padding:16px 18px;max-width:1500px;margin:0 auto}
+.sales-layout{display:grid;grid-template-columns:minmax(0,1fr) 380px;grid-template-areas:"top sum" "board cat";align-items:start;gap:16px;padding:16px 18px;max-width:1500px;margin:0 auto}
 .top{grid-area:top}
-.board-wrap{grid-area:board;display:flex;flex-direction:column;scroll-margin-top:70px}
-.catalog{grid-area:cat;display:flex;flex-direction:column;min-height:0;scroll-margin-top:70px}
+.board-wrap{grid-area:board;display:flex;flex-direction:column;align-self:stretch;scroll-margin-top:70px}
+.catalog{grid-area:cat;display:flex;flex-direction:column;min-height:0;align-self:stretch;scroll-margin-top:70px}
 .summary{grid-area:sum;scroll-margin-top:70px}
 .quick{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;background:var(--sand);border-radius:12px;padding:7px 12px;margin-bottom:10px;font-size:13px}
 .quick .q-net{background:var(--forest);color:#fff;padding:2px 10px;border-radius:8px}
 .quick .q-net b{font-size:15px}
 .quick .q-link{margin-left:auto;color:var(--moss);font-weight:600;text-decoration:none}
-.sum-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:24px;align-items:start}
+.sum-grid{display:flex;flex-direction:column;gap:6px}
 .step{display:flex;align-items:center;gap:10px;font-weight:700;margin:4px 0 10px;flex-wrap:wrap}
 .step .muted{font-weight:400;font-size:13px}
 .step-n{width:26px;height:26px;border-radius:50%;background:var(--ember);color:#fff;display:grid;place-items:center;font-size:14px;flex:none}
@@ -147,7 +147,7 @@ body.dragging .slot.filled.can{border-color:var(--leaf)}
 
 .summary{}
 .warn{background:#fdf3dc;color:#8a5f00;border-radius:10px;padding:7px 10px;font-size:13px;margin-bottom:10px}
-.lines{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.lines{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
 .line{display:grid;grid-template-columns:44px 1fr auto auto;gap:10px;align-items:center}
 .line img{width:44px;height:34px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 .ln-main{font-size:13px;line-height:1.3}
@@ -157,14 +157,14 @@ body.dragging .slot.filled.can{border-color:var(--leaf)}
 .tot-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:14px}
 .disc{display:flex;align-items:center;gap:4px}
 .disc input{width:96px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;text-align:right}
-.tot-net{display:flex;justify-content:space-between;align-items:baseline;background:var(--forest);color:#fff;border-radius:14px;padding:10px 14px;margin:8px 0}
-.tot-net b{font-size:24px}
+.tot-net{display:flex;justify-content:space-between;align-items:baseline;background:var(--forest);color:#fff;border-radius:14px;padding:8px 14px;margin:6px 0}
+.tot-net b{font-size:22px}
 .costbox{background:var(--sand);border-radius:14px;padding:8px 14px}
 .costbox .tot-row{font-size:13px}
 .good{color:var(--ok)} .mid{color:var(--warn)} .bad{color:var(--danger)}
 .meter{height:6px;background:rgba(0,0,0,.08);border-radius:9px;overflow:hidden;margin:4px 0 2px}
 .meter i{display:block;height:100%;background:var(--ok);border-radius:9px}
-.sum-actions{display:flex;gap:8px;margin-top:12px}
+.sum-actions{display:flex;gap:8px;margin-top:10px}
 .sum-actions .btn{flex:1;justify-content:center}
 .hide-cost .cost{display:none!important}
 
@@ -173,8 +173,8 @@ body.dragging .slot.filled.can{border-color:var(--leaf)}
 
 @media (max-width:1000px){
   .sales-layout{grid-template-columns:1fr;grid-template-areas:"top" "board" "cat" "sum";padding:12px}
+  .board-wrap,.catalog{align-self:auto}
   .catalog-grid{height:auto;flex:none;max-height:330px}
-  .sum-grid{grid-template-columns:1fr;gap:10px}
   .board{--slot:76px !important;height:430px}
 }
 @media (max-width:560px){
