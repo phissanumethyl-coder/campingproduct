@@ -8,7 +8,7 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%231f3a2e%22/%3E%3Ccircle%20cx%3D%2248%22%20cy%3D%2216%22%20r%3D%225%22%20fill%3D%22%23f3ead8%22/%3E%3Cpath%20d%3D%22M32%2012%20L54%2050%20H10%20Z%22%20fill%3D%22%23d9732b%22/%3E%3Cpath%20d%3D%22M32%2012%20L32%2050%22%20stroke%3D%22%231f3a2e%22%20stroke-width%3D%222.5%22/%3E%3Cpath%20d%3D%22M25%2050%20L32%2034%20L39%2050%20Z%22%20fill%3D%22%231f3a2e%22/%3E%3Cpath%20d%3D%22M6%2050%20H58%22%20stroke%3D%22%235f8f62%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 <div id="app" hidden>
@@ -36,6 +36,7 @@
         <span id="addSlotBtns"></span>
         <button class="btn sm danger" id="clearBoard">ล้างสินค้าในช่อง</button>
         <button class="btn sm" id="resetSlots" title="กลับเป็นช่องตั้งต้นของรูปแบบชุดที่เลือก">↺ รีเซ็ตช่อง</button>
+        <button class="btn sm scene-btn" id="sceneBtn" title="สลับระหว่างมุมมองจัดชุด กับ มุมมองฉากแคมป์จริง">🏕 มุมมองฉากจริง</button>
       </div>
       <div class="quick" id="quick"></div>
       <div id="board" class="board"></div>
@@ -53,7 +54,7 @@
 </div>
 
 <div id="tip" class="tip" hidden></div>
-<script src="store.js?v=6"></script>
+<script src="store.js?v=7"></script>
 <script>
 const U = CampUI;
 let D;
@@ -73,6 +74,8 @@ async function init() {
   S.cat = D.categories[0]?.id;
   const hc = sessionStorage.getItem('campset_hidecost') === '1';
   $('#hideCost').checked = hc; document.body.classList.toggle('hide-cost', hc);
+  S.scene = localStorage.getItem('campset_scene') === '1';
+  applyBoardLook();
   bind();
   selectTemplate(D.templates[0]?.id || 'custom');
   renderCatTabs(); renderCatalog();
@@ -140,14 +143,32 @@ function loadPreset(id) {
 }
 
 /* ---------------- board ---------------- */
+function applyBoardLook() {
+  const b = $('#board'), st = D.settings;
+  const bg = st.boardBg || (S.scene ? U.DEFAULT_SCENE : '');
+  b.style.backgroundImage = bg ? `url("${bg}")` : '';
+  b.classList.toggle('has-bg', !!bg);
+  b.classList.toggle('no-mat', !!bg && (S.scene || st.boardMat === false));
+  b.classList.toggle('scene', S.scene);
+  const btn = $('#sceneBtn');
+  btn.classList.toggle('on', S.scene);
+  btn.textContent = S.scene ? '🧩 มุมมองจัดชุด' : '🏕 มุมมองฉากจริง';
+}
+// รูปที่ใช้ในมุมมองฉาก: รูปตัดพื้นหลัง (PNG) → ถ้าไม่มีรูปเลยใช้ไอคอนพื้นใส → ถ้ามีแค่รูปปกติใช้แบบการ์ด
+function sceneSrc(p) {
+  if (p.sceneImage) return p.sceneImage;
+  if (!p.image) return U.iconUri(kindOf(p.cat), p.color);
+  return null;
+}
 function slotHTML(i, style = '') {
   const s = S.slots[i], p = s.pid && P(s.pid), k = kindOf(s.cat), cn = C(s.cat).name;
-  const cls = `slot k-${k} ${p ? 'filled' : ''} ${style ? 'abs' : ''}`;
+  const cut = p && S.scene ? sceneSrc(p) : null;
+  const cls = `slot k-${k} ${p ? 'filled' : ''} ${style ? 'abs' : ''} ${cut ? 'cut' : ''}`;
   if (!p) return `<div class="${cls}" data-i="${i}" style="${style}">
       <div class="sil">${U.icon(k, null, 'ghost')}</div><span class="slot-l">วาง${U.esc(cn)}</span>
       <button class="del" data-act="del" title="ลบช่องนี้"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></button></div>`;
   return `<div class="${cls}" data-i="${i}" style="${style}">
-      <img src="${U.img(p, D)}" alt="" draggable="false">
+      <img src="${cut || U.img(p, D)}" alt="" draggable="false">
       <div class="slot-code">${U.esc(p.code)}</div><div class="slot-price">฿${U.fmt(p.price)}</div>
       <div class="slot-acts"><button data-act="fill" title="ใช้ตัวนี้กับทุกช่อง${U.esc(cn)}ที่ว่าง">⇉</button><button data-act="rm" title="เอาสินค้าออกจากช่อง"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></button></div></div>`;
 }
@@ -158,11 +179,14 @@ function renderBoard(popAll, popIndex) {
   const n = around.length;
   let html = `<div class="mat"></div><div class="board-center">${center.map(i => slotHTML(i)).join('')}</div>`;
   const start = -Math.PI / 2 + Math.PI / Math.max(n, 1);
-  const rx = b.clientWidth < 520 ? 37 : 41, ry = 37;
+  const rx = b.clientWidth < 520 ? 37 : 41;
+  const cy = S.scene ? 60 : 50, ry = S.scene ? 28 : 37; // มุมมองฉาก: ดันลงมาอยู่บนพื้น
   around.forEach((i, k) => {
     const a = start + (2 * Math.PI * k) / n;
-    const x = 50 + rx * Math.cos(a), y = 50 + ry * Math.sin(a);
-    html += slotHTML(i, `left:${x.toFixed(2)}%;top:${y.toFixed(2)}%`);
+    const x = 50 + rx * Math.cos(a), y = cy + ry * Math.sin(a);
+    // ระยะลึก: ของที่อยู่ไกล (ด้านบน) เล็กลง ของที่อยู่ใกล้ (ด้านล่าง) ใหญ่ขึ้นและบังของด้านหลัง
+    const d = S.scene ? (0.72 + 0.5 * (y - (cy - ry)) / (2 * ry)) : 1;
+    html += slotHTML(i, `left:${x.toFixed(2)}%;top:${y.toFixed(2)}%;--d:${d.toFixed(2)};z-index:${Math.round(y) + 3}`);
   });
   if (!S.slots.length) html += `<div class="board-empty">กระดานว่าง — กด “+ ช่อง” ด้านบน<br>หรือแตะ/ลากสินค้าจากแคตตาล็อกมาวางที่นี่</div>`;
   b.innerHTML = html;
@@ -404,6 +428,10 @@ function bind() {
     S.slots.push({ cat: b.dataset.add, pid: null }); changed();
   });
   $('#clearBoard').addEventListener('click', () => { S.slots.forEach(s => s.pid = null); S.discount = 0; S.presetId = null; renderPresets(); changed(); });
+  $('#sceneBtn').addEventListener('click', () => {
+    S.scene = !S.scene; localStorage.setItem('campset_scene', S.scene ? '1' : '0');
+    applyBoardLook(); renderBoard(true);
+  });
   $('#resetSlots').addEventListener('click', () => {
     const t = D.templates.find(x => x.id === S.templateId);
     S.slots = slotsFromCounts(t ? t.counts : DEFAULT_COUNTS);
@@ -427,7 +455,7 @@ function bind() {
   $('#logout').addEventListener('click', () => CampAuth.logout());
   // ถ้าผู้ดูแลแก้ข้อมูลในแท็บอื่น ให้โหลดใหม่
   let rw; window.addEventListener('resize', () => { clearTimeout(rw); rw = setTimeout(() => renderBoard(), 150); });
-  window.addEventListener('storage', async () => { D = await CampStore.load(); renderTemplates(); renderPresets(); renderCatTabs(); renderCatalog(); renderBoard(); renderSummary(); });
+  window.addEventListener('storage', async () => { D = await CampStore.load(); applyBoardLook(); renderTemplates(); renderPresets(); renderCatTabs(); renderCatalog(); renderBoard(); renderSummary(); });
 }
 </script>
 </body>

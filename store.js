@@ -62,16 +62,18 @@
       // Firebase: await setDoc(doc(db,'campset','main'), data);
       localStorage.setItem(KEY, JSON.stringify(data));
     },
-    async uploadImage(file) {
+    async uploadImage(file, opts = {}) {
       // Firebase: อัปโหลดไป Storage แล้ว return getDownloadURL(...)
       // ตอนนี้ย่อรูปแล้วเก็บเป็น dataURL (ประหยัดพื้นที่ localStorage)
-      return resizeImage(file, 480);
+      // opts.png = true  → เก็บเป็น PNG พื้นใส (ใช้กับรูปสินค้าสำหรับมุมมองฉาก)
+      // opts.max = ขนาดด้านยาวสุด (px)
+      return resizeImage(file, opts.max || 480, !!opts.png);
     },
     async reset() { localStorage.removeItem(KEY); return clone(SAMPLE); },
     sample() { return clone(SAMPLE); }
   };
 
-  function resizeImage(file, max) {
+  function resizeImage(file, max, png) {
     return new Promise((res, rej) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
@@ -80,10 +82,10 @@
         const c = document.createElement('canvas');
         c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
         const ctx = c.getContext('2d');
-        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+        if (!png) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
         ctx.drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
-        res(c.toDataURL('image/jpeg', 0.82));
+        res(png ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', max > 1000 ? 0.8 : 0.82));
       };
       img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('อ่านไฟล์รูปไม่ได้')); };
       img.src = url;
@@ -117,6 +119,25 @@
     const svg = `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg"><rect width="120" height="90" fill="#f6efe2"/>${icon(kind, color, 'fill').replace(/^<svg[^>]*>|<\/svg>$/g, '')}</svg>`;
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
   }
+
+  // ไอคอนพื้นใส (ใช้ในมุมมองฉากเมื่อสินค้ายังไม่มีรูปตัดพื้นหลัง)
+  function iconUri(kind, color) {
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon(kind, color, 'fill'));
+  }
+
+  // ฉากตัวอย่าง (ภูเขา + ป่าสน + ลานหญ้า) ใช้เมื่อยังไม่ได้ตั้งรูปพื้นหลังเอง
+  const DEFAULT_SCENE = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" preserveAspectRatio="xMidYMid slice">
+    <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9cc7e0"/><stop offset="1" stop-color="#f4e3c4"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7f9f5a"/><stop offset="1" stop-color="#4f7a3c"/></linearGradient>
+    <radialGradient id="sun" cx=".78" cy=".12" r=".25"><stop offset="0" stop-color="#fff6d8" stop-opacity=".95"/><stop offset="1" stop-color="#fff6d8" stop-opacity="0"/></radialGradient></defs>
+    <rect width="1200" height="700" fill="url(#sky)"/><rect width="1200" height="700" fill="url(#sun)"/>
+    <path d="M0 190 L140 90 L250 160 L380 60 L520 170 L640 100 L780 180 L900 80 L1040 170 L1200 110 V260 H0Z" fill="#8aa6b8" opacity=".75"/>
+    <path d="M0 220 L120 150 L260 210 L420 130 L560 215 L720 150 L880 220 L1020 140 L1200 200 V280 H0Z" fill="#6f8f8a"/>
+    <g fill="#2f5a3f">${Array.from({ length: 34 }, (_, i) => { const x = i * 37 - 10, h = 60 + (i * 53 % 50); return `<path d="M${x} 270 L${x + 18} ${270 - h} L${x + 36} 270Z"/>`; }).join('')}</g>
+    <g fill="#24472f">${Array.from({ length: 26 }, (_, i) => { const x = i * 48 + 8, h = 80 + (i * 37 % 60); return `<path d="M${x} 285 L${x + 24} ${285 - h} L${x + 48} 285Z"/>`; }).join('')}</g>
+    <rect y="270" width="1200" height="430" fill="url(#gr)"/>
+    <g fill="#6a8f4a" opacity=".5">${Array.from({ length: 60 }, (_, i) => `<ellipse cx="${(i * 97) % 1200}" cy="${300 + (i * 61) % 390}" rx="${18 + i % 5 * 6}" ry="4"/>`).join('')}</g>
+  </svg>`);
 
   function img(p, data) {
     if (!p) return '';
@@ -176,5 +197,5 @@
 
   window.CampStore = CampStore;
   window.CampAuth = CampAuth;
-  window.CampUI = { esc, fmt, uid, icon, img, toast };
+  window.CampUI = { esc, fmt, uid, icon, iconUri, img, toast, DEFAULT_SCENE };
 })();
