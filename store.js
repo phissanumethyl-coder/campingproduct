@@ -1,8 +1,10 @@
 /* =========================================================
    CampSet — ชั้นข้อมูล (Data layer)
-   ตอนนี้เก็บข้อมูลไว้ใน localStorage ของเบราว์เซอร์
-   ถ้าจะต่อ Firebase ให้แก้แค่ฟังก์ชัน load / save / uploadImage ในไฟล์นี้
-   (หน้า index.html และ admin.html เรียกผ่าน CampStore เท่านั้น)
+   - ถ้าใส่ค่าใน firebase-config.js → ใช้ Firebase (Firestore + Authentication)
+   - ถ้ายังไม่ใส่ → เก็บใน localStorage ของเบราว์เซอร์เหมือนเดิม
+   โครงสร้างใน Firestore:
+     campset/main            { json: "<ข้อมูลทั้งหมด (ไม่มีรูป)>", updatedAt }
+     campset_images/{id}     { data: "<รูปแบบ dataURL>" }   ← ใช้แพ็กเกจฟรีได้ ไม่ต้องใช้ Storage
    ========================================================= */
 (function () {
   const KEY = 'campset_data_v1';
@@ -48,28 +50,124 @@
 
   const clone = o => JSON.parse(JSON.stringify(o));
 
-  // ---------- Store (แก้ส่วนนี้ตอนต่อ Firebase) ----------
+  // ---------- Firebase ----------
+  const FBC = window.CAMPSET_FIREBASE || {};
+  const USE_FB = !!(FBC.config && FBC.config.apiKey && FBC.config.projectId);
+  const SDK = FBC.sdkBase || 'https://www.gstatic.com/firebasejs/12.15.0';
+  const ADMIN_EMAIL = (FBC.adminEmail || '').trim().toLowerCase();
+  const SALES_EMAIL = (FBC.salesEmail || '').trim().toLowerCase();
+  let fbp = null;
+  function fb() {
+    if (!fbp) fbp = (async () => {
+      const [A, F, U] = await Promise.all([
+        import(SDK + '/firebase-app.js'), import(SDK + '/firebase-firestore.js'), import(SDK + '/firebase-auth.js')
+      ]);
+      const app = A.initializeApp(FBC.config);
+      const db = F.getFirestore(app);
+      const auth = U.getAuth(app);
+      return { F, U, db, auth, main: F.doc(db, 'campset', 'main') };
+    })();
+    return fbp;
+  }
+
+  const imgCache = new Map();   // id -> dataURL
+  let imgCacheFull = false;
+  let lastJson = null;
+
+  // ช่องที่เก็บรูปในข้อมูล
+  function imageSlots(d) {
+    const out = [];
+    (d.products || []).forEach(p => { out.push([p, 'image'], [p, 'sceneImage']); });
+    if (d.settings) out.push([d.settings, 'boardBg']);
+    return out;
+  }
+  function hash(str) { // cyrb53
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
+  }
+  async function resolveImages(d) {
+    const { F, db } = await fb();
+    if (!imgCacheFull) {
+      const snap = await F.getDocs(F.collection(db, 'campset_images'));
+      snap.forEach(x => imgCache.set(x.id, x.data().data));
+      imgCacheFull = true;
+    }
+    for (const [o, k] of imageSlots(d)) {
+      const v = o[k];
+      if (typeof v !== 'string' || !v.startsWith('img:')) continue;
+      const id = v.slice(4);
+      if (!imgCache.has(id)) {
+        const x = await F.getDoc(F.doc(db, 'campset_images', id));
+        imgCache.set(id, x.exists() ? x.data().data : '');
+      }
+      o[k] = imgCache.get(id) || '';
+    }
+    return d;
+  }
+  function readLocal() {
+    try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  }
+  function rememberShop(d) { try { localStorage.setItem('campset_shopname', d.settings?.shopName || 'CampSet'); } catch {} }
+
+  // ---------- Store ----------
   const CampStore = {
+    mode: USE_FB ? 'firebase' : 'local',
     async load() {
-      // Firebase: const snap = await getDoc(doc(db,'campset','main')); return snap.data();
-      try {
-        const raw = localStorage.getItem(KEY);
-        if (raw) return JSON.parse(raw);
-      } catch (e) { console.warn(e); }
-      return clone(SAMPLE);
+      if (!USE_FB) return readLocal() || clone(SAMPLE);
+      const { F, main } = await fb();
+      const snap = await F.getDoc(main);
+      if (!snap.exists()) return readLocal() || clone(SAMPLE); // ยังไม่เคยบันทึกขึ้น Firebase
+      lastJson = snap.data().json;
+      const d = await resolveImages(JSON.parse(lastJson));
+      rememberShop(d);
+      return d;
     },
     async save(data) {
-      // Firebase: await setDoc(doc(db,'campset','main'), data);
-      localStorage.setItem(KEY, JSON.stringify(data));
+      if (!USE_FB) { localStorage.setItem(KEY, JSON.stringify(data)); return; }
+      const { F, db, main } = await fb();
+      if (!imgCacheFull) await resolveImages({}); // โหลดรายการรูปเดิมเพื่อใช้ลบรูปที่ไม่ใช้แล้ว
+      const copy = clone(data);
+      if (copy.settings) { delete copy.settings.salesCode; delete copy.settings.adminCode; } // รหัสอยู่ใน Firebase Auth แทน
+      const used = new Set(), writes = [];
+      for (const [o, k] of imageSlots(copy)) {
+        const v = o[k];
+        if (typeof v !== 'string' || !v.startsWith('data:')) continue;
+        const id = 'i' + hash(v);
+        used.add(id);
+        if (!imgCache.has(id)) { writes.push(F.setDoc(F.doc(db, 'campset_images', id), { data: v }).then(() => imgCache.set(id, v))); }
+        o[k] = 'img:' + id;
+      }
+      await Promise.all(writes);
+      lastJson = JSON.stringify(copy);
+      await F.setDoc(main, { json: lastJson, updatedAt: F.serverTimestamp() });
+      rememberShop(copy);
+      const unused = [...imgCache.keys()].filter(id => !used.has(id));
+      await Promise.all(unused.map(id => F.deleteDoc(F.doc(db, 'campset_images', id)).then(() => imgCache.delete(id)).catch(() => {})));
+    },
+    // เรียก cb(ข้อมูลใหม่) เมื่อมีการแก้ข้อมูลจากเครื่องอื่น/แท็บอื่น
+    onChange(cb) {
+      if (!USE_FB) {
+        window.addEventListener('storage', e => { if (e.key === KEY) CampStore.load().then(cb); });
+        return;
+      }
+      fb().then(({ F, main }) => F.onSnapshot(main, async snap => {
+        if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+        const json = snap.data().json;
+        if (json === lastJson) return;
+        lastJson = json;
+        cb(await resolveImages(JSON.parse(json)));
+      }, err => console.warn('onSnapshot', err)));
     },
     async uploadImage(file, opts = {}) {
-      // Firebase: อัปโหลดไป Storage แล้ว return getDownloadURL(...)
-      // ตอนนี้ย่อรูปแล้วเก็บเป็น dataURL (ประหยัดพื้นที่ localStorage)
-      // opts.png = true  → เก็บเป็น PNG พื้นใส (ใช้กับรูปสินค้าสำหรับมุมมองฉาก)
-      // opts.max = ขนาดด้านยาวสุด (px)
+      // ย่อรูปแล้วเก็บเป็น dataURL — ตอนบันทึก (Firebase) จะแยกไปเก็บใน campset_images ให้อัตโนมัติ
+      // opts.png = true → PNG พื้นใส (รูปสำหรับมุมมองฉาก), opts.max = ด้านยาวสุด (px)
       return resizeImage(file, opts.max || 480, !!opts.png);
     },
-    async reset() { localStorage.removeItem(KEY); return clone(SAMPLE); },
+    readLocal,
+    async reset() { if (!USE_FB) localStorage.removeItem(KEY); return clone(SAMPLE); },
     sample() { return clone(SAMPLE); }
   };
 
@@ -85,7 +183,11 @@
         if (!png) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
         ctx.drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
-        res(png ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', max > 1000 ? 0.8 : 0.82));
+        let out, q = max > 1000 ? 0.8 : 0.82;
+        if (png) out = c.toDataURL('image/png');
+        else { out = c.toDataURL('image/jpeg', q); while (out.length > 900000 && q > 0.4) { q -= 0.1; out = c.toDataURL('image/jpeg', q); } }
+        if (out.length > 1000000) return rej(new Error('รูปใหญ่เกินไป กรุณาใช้รูปที่เล็กลง'));
+        res(out);
       };
       img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('อ่านไฟล์รูปไม่ได้')); };
       img.src = url;
@@ -154,35 +256,63 @@
   }
 
   // ---------- รหัสเข้าใช้ ----------
-  // หมายเหตุ: เป็นการกันหน้าแบบง่ายฝั่งเบราว์เซอร์ ตอนต่อ Firebase ควรเปลี่ยนเป็น Firebase Auth + Security Rules
+  // โหมด Firebase: ใช้ Firebase Authentication (บัญชีพนักงาน 1 บัญชี + ผู้ดูแล 1 บัญชี) รหัสเข้าใช้ = รหัสผ่านของบัญชีนั้น
+  // โหมดเครื่องนี้: เทียบกับรหัสใน settings (กันหน้าแบบง่าย)
+  const roleOf = email => { const e = (email || '').toLowerCase(); return e === ADMIN_EMAIL ? 'admin' : e === SALES_EMAIL ? 'sales' : null; };
   const CampAuth = {
     async require(role, onPass) {
       const show = () => { const a = document.getElementById('app'); if (a) a.hidden = false; };
-      const cur = sessionStorage.getItem(ROLE_KEY);
-      if (cur === 'admin' || cur === role) { show(); return onPass(); }
-      const d = await CampStore.load();
-      const isDefault = d.settings.salesCode === '1234' && d.settings.adminCode === '9999';
+      let check, shopName, hint = '';
+      if (USE_FB) {
+        let F;
+        try { F = await fb(); } catch (e) { return fatal('โหลด Firebase ไม่สำเร็จ — ตรวจอินเทอร์เน็ต หรือค่าใน firebase-config.js', e); }
+        const { U, auth } = F;
+        const user = await new Promise(r => { const un = U.onAuthStateChanged(auth, u => { un(); r(u); }); });
+        const r0 = user && roleOf(user.email);
+        if (r0 === 'admin' || r0 === role) { show(); return onPass(); }
+        if (user) await U.signOut(auth);
+        shopName = localStorage.getItem('campset_shopname') || 'CampSet';
+        check = async code => {
+          const tries = role === 'admin' ? [ADMIN_EMAIL] : [SALES_EMAIL, ADMIN_EMAIL];
+          for (const email of tries) {
+            try { await U.signInWithEmailAndPassword(auth, email, code); return roleOf(email); }
+            catch (e) {
+              if (e.code === 'auth/network-request-failed') throw new Error('เชื่อมต่ออินเทอร์เน็ตไม่ได้');
+              if (e.code === 'auth/too-many-requests') throw new Error('ลองผิดหลายครั้งเกินไป กรุณารอสักครู่');
+            }
+          }
+          return null;
+        };
+      } else {
+        const cur = sessionStorage.getItem(ROLE_KEY);
+        if (cur === 'admin' || cur === role) { show(); return onPass(); }
+        const d = await CampStore.load();
+        shopName = d.settings.shopName;
+        if (d.settings.salesCode === '1234' && d.settings.adminCode === '9999') hint = '<small class="gate-hint">รหัสทดลอง — พนักงาน 1234 · ผู้ดูแล 9999</small>';
+        check = async v => v === d.settings.adminCode ? 'admin' : (role === 'sales' && v === d.settings.salesCode) ? 'sales' : null;
+      }
       const g = document.createElement('div');
       g.className = 'gate';
       g.innerHTML = `<form class="gate-card">
           <div class="gate-logo">⛺</div>
-          <h1>${esc(d.settings.shopName)}</h1>
+          <h1>${esc(shopName)}</h1>
           <p>${role === 'admin' ? 'เข้าสู่ระบบผู้ดูแล' : 'เข้าสู่ระบบพนักงานขาย'}</p>
-          <input type="password" inputmode="numeric" autocomplete="off" placeholder="ใส่รหัสเข้าใช้" required>
+          <input type="password" autocomplete="current-password" placeholder="ใส่รหัสเข้าใช้" required>
           <button class="btn primary block">เข้าใช้งาน</button>
           <div class="gate-err"></div>
-          ${isDefault ? '<small class="gate-hint">รหัสทดลอง — พนักงาน 1234 · ผู้ดูแล 9999</small>' : ''}
+          ${hint}
           ${role === 'admin' ? '<a class="gate-link" href="index.html">← กลับหน้าพนักงานขาย</a>' : ''}
         </form>`;
       document.body.appendChild(g);
-      const form = g.querySelector('form'), input = g.querySelector('input'), err = g.querySelector('.gate-err');
+      const form = g.querySelector('form'), input = g.querySelector('input'), err = g.querySelector('.gate-err'), btn = g.querySelector('button');
       input.focus();
-      form.addEventListener('submit', e => {
+      form.addEventListener('submit', async e => {
         e.preventDefault();
         const v = input.value.trim();
+        btn.disabled = true; err.textContent = '';
         let r = null;
-        if (v === d.settings.adminCode) r = 'admin';
-        else if (role === 'sales' && v === d.settings.salesCode) r = 'sales';
+        try { r = await check(v); } catch (ex) { err.textContent = ex.message; btn.disabled = false; return; }
+        btn.disabled = false;
         if (!r) {
           err.textContent = 'รหัสไม่ถูกต้อง';
           form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
@@ -191,8 +321,18 @@
         sessionStorage.setItem(ROLE_KEY, r);
         g.remove(); show(); onPass();
       });
+      function fatal(msg, e) {
+        console.error(e);
+        const x = document.createElement('div'); x.className = 'gate';
+        x.innerHTML = `<div class="gate-card"><div class="gate-logo">⚠️</div><p>${esc(msg)}</p><button class="btn primary block" onclick="location.reload()">ลองใหม่</button></div>`;
+        document.body.appendChild(x);
+      }
     },
-    logout() { sessionStorage.removeItem(ROLE_KEY); location.reload(); }
+    async logout() {
+      sessionStorage.removeItem(ROLE_KEY);
+      if (USE_FB) { try { const { U, auth } = await fb(); await U.signOut(auth); } catch {} }
+      location.reload();
+    }
   };
 
   window.CampStore = CampStore;

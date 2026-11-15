@@ -8,7 +8,7 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%231f3a2e%22/%3E%3Ccircle%20cx%3D%2248%22%20cy%3D%2216%22%20r%3D%225%22%20fill%3D%22%23f3ead8%22/%3E%3Cpath%20d%3D%22M32%2012%20L54%2050%20H10%20Z%22%20fill%3D%22%23d9732b%22/%3E%3Cpath%20d%3D%22M32%2012%20L32%2050%22%20stroke%3D%22%231f3a2e%22%20stroke-width%3D%222.5%22/%3E%3Cpath%20d%3D%22M25%2050%20L32%2034%20L39%2050%20Z%22%20fill%3D%22%231f3a2e%22/%3E%3Cpath%20d%3D%22M6%2050%20H58%22%20stroke%3D%22%235f8f62%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <div id="app" hidden>
@@ -54,7 +54,8 @@
 </div>
 
 <div id="tip" class="tip" hidden></div>
-<script src="store.js?v=7"></script>
+<script src="firebase-config.js?v=8"></script>
+<script src="store.js?v=8"></script>
 <script>
 const U = CampUI;
 let D;
@@ -455,7 +456,8 @@ function bind() {
   $('#logout').addEventListener('click', () => CampAuth.logout());
   // ถ้าผู้ดูแลแก้ข้อมูลในแท็บอื่น ให้โหลดใหม่
   let rw; window.addEventListener('resize', () => { clearTimeout(rw); rw = setTimeout(() => renderBoard(), 150); });
-  window.addEventListener('storage', async () => { D = await CampStore.load(); applyBoardLook(); renderTemplates(); renderPresets(); renderCatTabs(); renderCatalog(); renderBoard(); renderSummary(); });
+  // อัปเดตทันทีเมื่อผู้ดูแลแก้ข้อมูล (Firebase: ข้ามเครื่องได้ / โหมดเครื่องนี้: ข้ามแท็บ)
+  CampStore.onChange(async d => { D = d; $('#shopName').textContent = D.settings.shopName; applyBoardLook(); renderTemplates(); renderPresets(); renderCatTabs(); renderCatalog(); renderBoard(); renderSummary(); });
 }
 </script>
 </body>

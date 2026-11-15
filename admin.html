@@ -8,12 +8,12 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%231f3a2e%22/%3E%3Ccircle%20cx%3D%2248%22%20cy%3D%2216%22%20r%3D%225%22%20fill%3D%22%23f3ead8%22/%3E%3Cpath%20d%3D%22M32%2012%20L54%2050%20H10%20Z%22%20fill%3D%22%23d9732b%22/%3E%3Cpath%20d%3D%22M32%2012%20L32%2050%22%20stroke%3D%22%231f3a2e%22%20stroke-width%3D%222.5%22/%3E%3Cpath%20d%3D%22M25%2050%20L32%2034%20L39%2050%20Z%22%20fill%3D%22%231f3a2e%22/%3E%3Cpath%20d%3D%22M6%2050%20H58%22%20stroke%3D%22%235f8f62%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <div id="app" hidden>
   <header class="topbar">
-    <div class="brand">⛺ <span id="shopName">CampSet</span> <small>ผู้ดูแลระบบ</small></div>
+    <div class="brand">⛺ <span id="shopName">CampSet</span> <small>ผู้ดูแลระบบ</small> <small id="modeBadge"></small></div>
     <div class="top-actions">
       <a href="index.html" class="btn sm">ไปหน้าจัดชุดขาย →</a>
       <button class="btn sm" id="logout">ออกจากระบบ</button>
@@ -41,7 +41,8 @@
   </form>
 </dialog>
 
-<script src="store.js?v=7"></script>
+<script src="firebase-config.js?v=8"></script>
+<script src="store.js?v=8"></script>
 <script>
 const U = CampUI, esc = U.esc, fmt = U.fmt;
 let D, tab = 'products', pf = 'all';
@@ -58,13 +59,20 @@ CampAuth.require('admin', init);
 async function init() {
   D = await CampStore.load();
   $('#shopName').textContent = D.settings.shopName;
+  $('#modeBadge').textContent = FB ? '☁️ Firebase' : '💾 เก็บในเครื่องนี้';
   document.querySelectorAll('.atab').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); });
   $('#logout').onclick = () => CampAuth.logout();
   render();
 }
+const FB = CampStore.mode === 'firebase';
 async function persist(msg) {
   try { await CampStore.save(D); U.toast(msg || 'บันทึกแล้ว'); return true; }
-  catch (e) { alert('บันทึกไม่สำเร็จ: ' + e.message + '\n(พื้นที่เก็บในเบราว์เซอร์อาจเต็ม ลองใช้รูปที่เล็กลงหรือลบรูปที่ไม่ใช้)'); return false; }
+  catch (e) {
+    console.error(e);
+    const hint = FB ? (e.code === 'permission-denied' ? 'บัญชีนี้ไม่มีสิทธิ์เขียนข้อมูล — ตรวจ Security Rules และอีเมลผู้ดูแลใน firebase-config.js' : 'ตรวจอินเทอร์เน็ต หรือรูปอาจใหญ่เกินไป')
+                    : 'พื้นที่เก็บในเบราว์เซอร์อาจเต็ม ลองใช้รูปที่เล็กลงหรือลบรูปที่ไม่ใช้';
+    alert('บันทึกไม่สำเร็จ: ' + e.message + '\n(' + hint + ')'); return false;
+  }
 }
 function render() {
   document.querySelectorAll('.atab').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
@@ -375,8 +383,9 @@ function vSettings() {
     <div class="box"><h3>ร้าน & รหัสเข้าใช้</h3>
       <div class="form" style="max-width:420px">
         <label>ชื่อร้าน<input id="stName" value="${esc(st.shopName)}"></label>
-        <label>รหัสพนักงานขาย<input id="stSales" value="${esc(st.salesCode)}"></label>
-        <label>รหัสผู้ดูแล<input id="stAdmin" value="${esc(st.adminCode)}"></label>
+        ${FB ? `<div class="muted" style="font-size:13px;background:var(--sand);padding:10px 12px;border-radius:10px">ใช้ Firebase อยู่ — เปลี่ยนรหัสเข้าใช้ได้ที่ Firebase console → Authentication → เลือกบัญชี → Reset password<br>บัญชีพนักงาน: <b>${esc(window.CAMPSET_FIREBASE.salesEmail)}</b> · ผู้ดูแล: <b>${esc(window.CAMPSET_FIREBASE.adminEmail)}</b></div>`
+        : `<label>รหัสพนักงานขาย<input id="stSales" value="${esc(st.salesCode)}"></label>
+        <label>รหัสผู้ดูแล<input id="stAdmin" value="${esc(st.adminCode)}"></label>`}
         <div><button class="btn primary" id="stSave">บันทึก</button></div>
       </div></div>
     <div class="box"><h3>พื้นหลังกระดานจัดชุด</h3>
@@ -391,8 +400,10 @@ function vSettings() {
         <div><button class="btn primary" id="bgSave">บันทึกพื้นหลัง</button></div>
       </div></div>
     <div class="box"><h3>สำรอง / ย้ายข้อมูล</h3>
-      <p class="muted" style="margin-top:0">ตอนนี้ข้อมูลเก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — ใช้ “ส่งออก” แล้ว “นำเข้า” ในเครื่องพนักงาน เพื่อให้ข้อมูลตรงกัน (เมื่อต่อ Firebase แล้วจะซิงก์ให้อัตโนมัติ)</p>
+      <p class="muted" style="margin-top:0">${FB ? 'ข้อมูลเก็บบน Firebase และซิงก์ทุกเครื่องอัตโนมัติ — ส่งออกไฟล์ JSON ไว้เป็นข้อมูลสำรองได้'
+        : 'ตอนนี้ข้อมูลเก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — ใช้ “ส่งออก” แล้ว “นำเข้า” ในเครื่องพนักงาน เพื่อให้ข้อมูลตรงกัน (เมื่อต่อ Firebase แล้วจะซิงก์ให้อัตโนมัติ)'}</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${FB && CampStore.readLocal() ? '<button class="btn primary" id="mig">☁️ อัปโหลดข้อมูลจากเบราว์เซอร์นี้ขึ้น Firebase</button>' : ''}
         <button class="btn" id="exp">⬇️ ส่งออกไฟล์ JSON</button>
         <label class="btn">⬆️ นำเข้าไฟล์ JSON<input type="file" id="imp" accept=".json,application/json" hidden></label>
         <button class="btn danger" id="rst">รีเซ็ตเป็นข้อมูลตัวอย่าง</button>
@@ -407,7 +418,13 @@ function vSettings() {
   $('#bgUrl').oninput = e => { const v = e.target.value.trim(); if (v) { bg = v; drawBg(); } };
   $('#bgClear').onclick = () => { bg = ''; $('#bgUrl').value = ''; drawBg(); };
   $('#bgSave').onclick = async () => { st.boardBg = bg; st.boardMat = $('#bgMat').checked; await persist('บันทึกพื้นหลังแล้ว'); };
+  $('#mig') && ($('#mig').onclick = async () => {
+    if (!confirm('นำข้อมูลที่เคยเก็บในเบราว์เซอร์นี้ (สินค้า รูป ชุด) ขึ้น Firebase แทนข้อมูลบน Firebase ตอนนี้ทั้งหมด?')) return;
+    D = CampStore.readLocal();
+    if (await persist('อัปโหลดขึ้น Firebase แล้ว')) { $('#shopName').textContent = D.settings.shopName; render(); }
+  });
   $('#stSave').onclick = async () => {
+    if (FB) { st.shopName = $('#stName').value.trim() || 'CampSet'; await persist(); $('#shopName').textContent = st.shopName; return; }
     const s = $('#stSales').value.trim(), a = $('#stAdmin').value.trim();
     if (!s || !a) return alert('รหัสห้ามว่าง');
     if (s === a) return alert('รหัสพนักงานกับผู้ดูแลต้องไม่ซ้ำกัน');
