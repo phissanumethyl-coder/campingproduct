@@ -403,7 +403,8 @@ function vSettings() {
       <p class="muted" style="margin-top:0">${FB ? 'ข้อมูลเก็บบน Firebase และซิงก์ทุกเครื่องอัตโนมัติ — ส่งออกไฟล์ JSON ไว้เป็นข้อมูลสำรองได้'
         : 'ตอนนี้ข้อมูลเก็บในเบราว์เซอร์เครื่องนี้เท่านั้น — ใช้ “ส่งออก” แล้ว “นำเข้า” ในเครื่องพนักงาน เพื่อให้ข้อมูลตรงกัน (เมื่อต่อ Firebase แล้วจะซิงก์ให้อัตโนมัติ)'}</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${FB && CampStore.readLocal() ? '<button class="btn primary" id="mig">☁️ อัปโหลดข้อมูลจากเบราว์เซอร์นี้ขึ้น Firebase</button>' : ''}
+        ${FB ? (CampStore.readLocal() ? '<button class="btn primary" id="mig">☁️ อัปโหลดข้อมูลจากเบราว์เซอร์นี้ขึ้น Firebase</button>'
+          : '<span class="muted" style="font-size:13px;align-self:center;background:var(--sand);padding:8px 12px;border-radius:10px">เบราว์เซอร์นี้ไม่มีข้อมูลเดิมให้อัปโหลด — ถ้าข้อมูลเดิมอยู่อีกเครื่อง ให้เปิดหน้านี้ในเครื่องนั้น</span>') : ''}
         <button class="btn" id="exp">⬇️ ส่งออกไฟล์ JSON</button>
         <label class="btn">⬆️ นำเข้าไฟล์ JSON<input type="file" id="imp" accept=".json,application/json" hidden></label>
         <button class="btn danger" id="rst">รีเซ็ตเป็นข้อมูลตัวอย่าง</button>
